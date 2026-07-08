@@ -1,5 +1,24 @@
+# Virtual Environment
 .venv/
+
+# Python Cache
 __pycache__/
 *.pyc
+
+# Environment Variables
 .env
+
+# VS Code Settings
 .vscode/
+
+# Generated Files
+outputs/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Folder Structure
+project_tree.txt

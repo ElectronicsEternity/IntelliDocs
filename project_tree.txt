@@ -1,5 +1,5 @@
 Folder PATH listing for volume Windows
-Volume serial number is 00000001 D09F:910C
+Volume serial number is 00000008 D09F:910C
 C:.
 |   .gitignore
 |   project_tree.txt
@@ -11,6 +11,7 @@ C:.
 |   |   
 |   +---Include
 |   +---Lib
+|   |   \---site-packages
 |   |       +---fitz
 |   |       |   |   table.py
 |   |       |   |   utils.py
@@ -1233,8 +1234,16 @@ C:.
 |           pythonw.exe
 |           
 +---app
+|   |   config.py
+|   |   constants.py
 |   |   __init__.py
 |   |   
+|   +---ingestion
+|   |   |   parser.py
+|   |   |   __init__.py
+|   |   |   
+|   |           parser.cpython-314.pyc
+|   |           
 |   +---models
 |   |   |   page.py
 |   |   |   __init__.py
@@ -1242,16 +1251,22 @@ C:.
 |   |           page.cpython-314.pyc
 |   |           __init__.cpython-314.pyc
 |   |           
+|   +---rag
+|   |       __init__.py
+|   |       
+|   +---services
+|   |       __init__.py
+|   |       
+|   +---storage
+|   |       __init__.py
+|   |       
+|   +---utils
+|   |       __init__.py
+|   |       
 |           __init__.cpython-314.pyc
 |           
 +---documents
 |       Akta Kerja 1955 (Akta 265)_0.pdf
 |       
-+---ingestion
-|   |   parser.py
-|   |   
-|           parser.cpython-314.pyc
-|           
-+---rag
-+---storage
++---outputs
 \---tests
