@@ -4,6 +4,9 @@ from pathlib import Path
 # Import PyMuPDF library (imported as fitz)
 import fitz
 
+# Import our custom Page model
+from app.models.page import Page
+
 
 # Class responsible for reading and extracting text from PDF files
 class PDFParser:
@@ -15,7 +18,7 @@ class PDFParser:
         self.pdf_path = pdf_path
 
     # Extract text from every page in the PDF
-    def extract_text(self) -> list[dict]:
+    def extract_text(self) -> list[Page]:
 
         # Create an empty list to store extracted pages
         pages = []
@@ -29,14 +32,22 @@ class PDFParser:
                 # Load the current page
                 page = document.load_page(page_index)
 
-                # Extract all text from the current page
+                # Extract plain text from the current page
                 text = page.get_text("text")
 
-                # Store page number and extracted text
-                pages.append({
-                    "page_number": page_index + 1,
-                    "text": text.strip()
-                })
+                # Create a Page object and add it to the list
+                pages.append(
+
+                    # Create a Page instance
+                    Page(
+
+                        # Store the current page number (starting from 1)
+                        page_number=page_index + 1,
+
+                        # Store the extracted text after removing leading/trailing spaces
+                        text=text.strip()
+                    )
+                )
 
         # Return all extracted pages
         return pages
@@ -81,8 +92,11 @@ def main():
     # Print a separator
     print("\n========== PAGE 1 ==========\n")
 
-    # Display the first page
-    print(pages[0]["text"])
+    # Display the page number
+    print(f"Page Number: {pages[0].page_number}")
+
+    # Display the extracted text
+    print(pages[0].text)
 
 
 # Execute only when this file is run directly
