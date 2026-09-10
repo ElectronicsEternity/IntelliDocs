@@ -13,6 +13,8 @@ __pycache__/
 
 # Generated Files
 outputs/
+tmp/
+documents/profiles/
 
 # macOS
 .DS_Store

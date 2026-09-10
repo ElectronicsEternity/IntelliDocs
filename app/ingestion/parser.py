@@ -1,104 +1,186 @@
-# Import Path for handling file and folder paths in a platform-independent way
+# ========================================
+# File: parser.py
+# ========================================
+#
+# Purpose
+# -------
+# Coordinate PDF extraction without depending on one PDF library.
+#
+# Responsibilities
+# ----------------
+# - Select the configured PDF parser adapter.
+# - Extract pages through the common parser interface.
+# - Detect the document language.
+# - Calculate the file hash.
+# - Build the IntelliDocs Document model.
+#
+# ========================================
+
+# Import hashlib for generating the document fingerprint.
+import hashlib
+
+# Import uuid for generating a new document identifier.
+import uuid
+
+# Import datetime for recording the document upload time.
+from datetime import datetime
+
+# Import Path for handling file and folder paths.
 from pathlib import Path
 
-# Import PyMuPDF library (imported as fitz)
-import fitz
+# Import language detection for the complete extracted document.
+from langdetect import detect
 
-# Import our custom Page model
-from app.models.page import Page
+# Import application constants used while building the Document model.
+from app.constants import (
+    DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_JURISDICTION,
+    DEFAULT_LANGUAGE,
+    DEFAULT_PUBLISHER,
+    FILE_READ_CHUNK_SIZE,
+    PDF_PARSER_PROVIDER,
+)
+
+# Import the common parser contract used by every adapter.
+from app.ingestion.parser_interface import PDFParserInterface
+
+# Import the shared Document model returned to the application.
+from app.models.document import Document
 
 
-# Class responsible for reading and extracting text from PDF files
+# ==========================================================
+# PDF Parser
+# ==========================================================
+
+# Coordinate common document processing around a selected parser adapter.
 class PDFParser:
 
-    # Constructor - receives the path of the PDF to process
-    def __init__(self, pdf_path: Path):
+    # Store the PDF path and select the configured adapter.
+    def __init__(
+        self,
+        pdf_path: Path,
+        adapter: PDFParserInterface | None = None,
+    ):
 
-        # Store the PDF path so other methods can access it
+        # Remember which PDF file should be processed.
         self.pdf_path = pdf_path
 
-    # Extract text from every page in the PDF
-    def extract_text(self) -> list[Page]:
+        # Use an explicitly supplied adapter or create the configured default.
+        self.adapter = adapter or self._create_default_adapter()
 
-        # Create an empty list to store extracted pages
-        pages = []
+    # ==========================================================
+    # Adapter Selection
+    # ==========================================================
 
-        # Open the PDF safely (automatically closes after processing)
-        with fitz.open(self.pdf_path) as document:
+    # Create the adapter selected in the application constants.
+    @staticmethod
+    def _create_default_adapter() -> PDFParserInterface:
 
-            # Loop through every page in the PDF
-            for page_index in range(document.page_count):
+        # Load PyMuPDF only when it is the configured provider.
+        if PDF_PARSER_PROVIDER == "pymupdf":
 
-                # Load the current page
-                page = document.load_page(page_index)
+            # Import locally so unused parser libraries are not loaded.
+            from app.ingestion.pymupdf_parser_adapter import PyMuPDFParserAdapter
 
-                # Extract plain text from the current page
-                text = page.get_text("text")
+            # Return the PyMuPDF implementation of the common interface.
+            return PyMuPDFParserAdapter()
 
-                # Create a Page object and add it to the list
-                pages.append(
+        # Load pdfplumber only when it is the configured provider.
+        if PDF_PARSER_PROVIDER == "pdfplumber":
 
-                    # Create a Page instance
-                    Page(
+            # Import locally so unused parser libraries are not loaded.
+            from app.ingestion.pdfplumber_parser_adapter import PdfPlumberParserAdapter
 
-                        # Store the current page number (starting from 1)
-                        page_number=page_index + 1,
+            # Return the pdfplumber implementation of the common interface.
+            return PdfPlumberParserAdapter()
 
-                        # Store the extracted text after removing leading/trailing spaces
-                        text=text.strip()
-                    )
-                )
+        # Reject configuration values that do not identify a known adapter.
+        raise ValueError(f"Unsupported PDF parser provider: {PDF_PARSER_PROVIDER}")
 
-        # Return all extracted pages
-        return pages
+    # ==========================================================
+    # PDF File Discovery
+    # ==========================================================
 
+    # Return every PDF file found inside the supplied directory.
+    @staticmethod
+    def get_pdf_files(directory: Path) -> list[Path]:
 
-# Retrieve every PDF file inside the specified folder
-def get_pdf_files(directory: Path) -> list[Path]:
+        # Sort the paths so ingestion order remains predictable.
+        return sorted(directory.glob("*.pdf"))
 
-    # Return all PDF files sorted alphabetically
-    return sorted(directory.glob("*.pdf"))
+    # ==========================================================
+    # Document Extraction
+    # ==========================================================
 
+    # Extract the PDF and return a complete IntelliDocs Document.
+    def extract_text(self, owner_id: str) -> Document:
 
-# Main entry point for testing
-def main():
+        # Delegate only page extraction to the selected library adapter.
+        pages = self.adapter.extract_pages(self.pdf_path)
 
-    # Define the folder containing PDFs
-    documents_folder = Path("documents")
+        # Combine non-empty pages for document-level language detection.
+        document_text = " ".join(page.text for page in pages if page.text)
 
-    # Retrieve all PDF files
-    pdf_files = get_pdf_files(documents_folder)
+        # Fall back to the default language when detection cannot complete.
+        try:
 
-    # Stop execution if no PDFs exist
-    if not pdf_files:
-        print("No PDF files found.")
-        return
+            # Detect language using a limited sample of the document text.
+            language = detect(document_text[:10000])
 
-    # Select the first PDF for testing
-    pdf = pdf_files[0]
+        # Handle language detection failures without stopping ingestion.
+        except Exception:
 
-    # Display which PDF is being processed
-    print(f"Processing: {pdf.name}")
+            # Use the configured fallback language.
+            language = DEFAULT_LANGUAGE
 
-    # Create a parser object
-    parser = PDFParser(pdf)
+        # Convert the Indonesian code sometimes returned for Malay text.
+        if language == "id":
 
-    # Extract text from every page
-    pages = parser.extract_text()
+            # Store the correct Malay language code.
+            language = "ms"
 
-    # Display total pages extracted
-    print(f"Total Pages: {len(pages)}")
+        # Build the common Document model used by all downstream components.
+        document = Document(
+            id=str(uuid.uuid4()),
+            filename=self.pdf_path.name,
+            file_extension=self.pdf_path.suffix.replace(".", ""),
+            file_size=self.pdf_path.stat().st_size,
+            file_hash=self.calculate_file_hash(self.pdf_path),
+            uploaded_at=datetime.now(),
+            title=self.pdf_path.stem,
+            total_pages=len(pages),
+            language=language,
+            jurisdiction=DEFAULT_JURISDICTION,
+            document_type=None,
+            publisher=DEFAULT_PUBLISHER,
+            processing_time_ms=0,
+            embedding_model=DEFAULT_EMBEDDING_MODEL,
+            indexed_at=None,
+            owner_id=owner_id,
+            pages=pages,
+        )
 
-    # Print a separator
-    print("\n========== PAGE 1 ==========\n")
+        # Return the completed Document to the ingestion workflow.
+        return document
 
-    # Display the page number
-    print(f"Page Number: {pages[0].page_number}")
+    # ==========================================================
+    # File Hashing
+    # ==========================================================
 
-    # Display the extracted text
-    print(pages[0].text)
+    # Generate the SHA256 fingerprint used for duplicate detection.
+    def calculate_file_hash(self, file_path: Path) -> str:
 
+        # Create an empty SHA256 hash calculation.
+        sha256 = hashlib.sha256()
 
-# Execute only when this file is run directly
-if __name__ == "__main__":
-    main()
+        # Open the PDF in binary mode and close it automatically afterward.
+        with open(file_path, "rb") as file:
+
+            # Read the PDF incrementally instead of loading it all into memory.
+            while chunk := file.read(FILE_READ_CHUNK_SIZE):
+
+                # Add the current group of bytes to the hash calculation.
+                sha256.update(chunk)
+
+        # Return the completed fingerprint as hexadecimal text.
+        return sha256.hexdigest()
