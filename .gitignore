@@ -7,6 +7,7 @@ __pycache__/
 
 # Environment Variables
 .env
+backend/.env
 
 # VS Code Settings
 .vscode/
@@ -15,6 +16,10 @@ __pycache__/
 outputs/
 tmp/
 documents/profiles/
+backend/outputs/
+backend/tmp/
+backend/documents/profiles/
+backend/documents/Profiles/
 
 # macOS
 .DS_Store
@@ -24,3 +29,11 @@ Thumbs.db
 
 # Folder Structure
 project_tree.txt
+
+# Frontend build output
+frontend/node_modules/
+frontend/dist/
+
+# Test / migration caches
+.pytest_cache/
+.coverage
