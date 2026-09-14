@@ -9,7 +9,13 @@ from app.config import settings
 
 def get_connection():
     if settings.DATABASE_URL:
-        return psycopg.connect(settings.DATABASE_URL)
+        return psycopg.connect(
+            settings.DATABASE_URL.replace(
+                "postgresql+psycopg://",
+                "postgresql://",
+                1,
+            )
+        )
     return psycopg.connect(
         host=settings.POSTGRES_HOST,
         port=settings.POSTGRES_PORT,
