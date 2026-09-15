@@ -1,5 +1,7 @@
 from app.services.rag.service import RagService
+from app.rag.generator import Generator
 from app.rag.retriever import Retriever
+from types import SimpleNamespace
 
 
 class FakeRetriever:
@@ -71,3 +73,94 @@ def test_retriever_scopes_every_search_path_to_owner():
 
     Retriever(Embedder(), Store()).retrieve("question", "user-a")
     assert owners == ["user-a", "user-a", "user-a"]
+
+
+def test_answer_prompt_requires_structured_markdown():
+    captured = {}
+
+    class Completions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                usage=None,
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Answer"))],
+            )
+
+    generator = Generator.__new__(Generator)
+    generator.client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    generator.last_usage = {}
+    generator.generate(
+        question="What are the rates?",
+        chunks=[{"text": "RM57.69", "document_title": "Order"}],
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "Format the answer as clean Markdown" in prompt
+    assert "Put every bullet or numbered item on its own line" in prompt
+    assert "Use nested bullets for subcategories" in prompt
+
+
+def test_chat_deduplicates_chunks_and_displays_at_most_five_sources():
+    class DuplicateRetriever:
+        def retrieve(self, **_kwargs):
+            chunks = [
+                {
+                    "chunk_id": f"chunk-{index}",
+                    "document_id": "doc-a",
+                    "document_title": "Order",
+                    "metadata": {},
+                    "text": f"Evidence {index}",
+                }
+                for index in range(6)
+            ]
+            return [chunks[0], chunks[0].copy(), *chunks[1:]]
+
+    class CapturingGenerator(FakeGenerator):
+        def __init__(self):
+            self.chunks = []
+
+        def generate(self, question, chunks):
+            self.chunks = chunks
+            return "answer"
+
+    generator = CapturingGenerator()
+    service = RagService(
+        retriever=DuplicateRetriever(),
+        generator=generator,
+        conversations=FakeConversations(),
+        usage=FakeUsage(),
+    )
+
+    result = service.chat(
+        question="question", user_id="user-a", conversation_id=None, top_k=10,
+    )
+
+    assert len(generator.chunks) == 6
+    assert len(result["sources"]) == 5
+    assert [source["text"] for source in result["sources"]] == [
+        "Evidence 0", "Evidence 1", "Evidence 2", "Evidence 3", "Evidence 4",
+    ]
+
+
+def test_table_source_exposes_structured_cells_for_display():
+    source = RagService._build_source({
+        "document_id": "doc-a",
+        "document_title": "Order",
+        "content_type": "table",
+        "text": "Row 1: columns 1-1: Area",
+        "metadata": {
+            "table_number": 3,
+            "page_numbers": [4, 5],
+            "fields": [{
+                "value": "Area",
+                "row_start": 1,
+                "row_end": 2,
+                "column_start": 1,
+                "column_end": 1,
+            }],
+        },
+    })
+
+    assert source["page_number"] == 4
+    assert source["table"]["table_number"] == 3
+    assert source["table"]["fields"][0]["value"] == "Area"

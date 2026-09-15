@@ -15,11 +15,20 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "intellidocs"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
-    MAX_UPLOAD_BYTES: int = 10 * 1024 * 1024
+    MAX_UPLOAD_BYTES: int = 15 * 1024 * 1024
     MAX_DOCUMENTS_PER_USER: int = 25
     MAX_STORAGE_BYTES_PER_USER: int = 50 * 1024 * 1024
     MAX_PAGES_PER_DOCUMENT: int = 500
     RAG_TOP_K: int = 10
+    FRONTEND_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    @property
+    def frontend_origins(self) -> list[str]:
+        return [
+            origin.strip().rstrip("/")
+            for origin in self.FRONTEND_ORIGINS.split(",")
+            if origin.strip()
+        ]
 
     model_config = SettingsConfigDict(
         env_file=(

@@ -29,8 +29,12 @@ class HierarchyImporter:
     def import_hierarchy(
         self,
         document_id: str,
-        hierarchy: dict
+        hierarchy: dict,
+        owner_id: str,
     ) -> None:
+
+        # Scope every hierarchy write to the authenticated document owner.
+        self.repository.owner_id = owner_id
 
         # Build and validate nodes before reaching the
         # database boundary.

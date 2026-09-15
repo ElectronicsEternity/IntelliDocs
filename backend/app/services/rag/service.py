@@ -59,6 +59,8 @@ class ConversationRepository:
 
 
 class RagService:
+    MAX_DISPLAY_SOURCES = 5
+
     def __init__(
         self,
         retriever: Retriever | None = None,
@@ -78,10 +80,12 @@ class RagService:
 
     def chat(self, *, question: str, user_id: str, conversation_id: str | None, top_k: int | None) -> dict:
         conversation_id = self.conversations.ensure(user_id, conversation_id)
-        chunks = self.retriever.retrieve(
-            question=question,
-            owner_id=user_id,
-            top_k=top_k or settings.RAG_TOP_K,
+        chunks = self._unique_chunks(
+            self.retriever.retrieve(
+                question=question,
+                owner_id=user_id,
+                top_k=top_k or settings.RAG_TOP_K,
+            )
         )
         answer = self.generator.generate(question=question, chunks=chunks)
         usage = getattr(self.generator, "last_usage", {}) or {}
@@ -96,16 +100,60 @@ class RagService:
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
         )
-        sources = [
-            {
-                "document_id": item["document_id"],
-                "document_title": item.get("document_title"),
-                "page_number": (item.get("metadata") or {}).get("start_page"),
-                "text": item["text"],
-            }
-            for item in chunks
-        ]
+        sources = [self._build_source(item) for item in chunks[:self.MAX_DISPLAY_SOURCES]]
         return {"conversation_id": conversation_id, "answer": answer, "sources": sources}
+
+    @staticmethod
+    def _build_source(item: dict) -> dict:
+        metadata = item.get("metadata") or {}
+        content_type = item.get("content_type") or "text"
+        table = None
+        if content_type == "table":
+            table = {
+                "table_number": metadata.get("table_number", 0),
+                "page_numbers": list(metadata.get("page_numbers") or []),
+                "fields": [
+                    {
+                        "value": str(field.get("value") or ""),
+                        "row_start": int(field["row_start"]),
+                        "row_end": int(field["row_end"]),
+                        "column_start": int(field["column_start"]),
+                        "column_end": int(field["column_end"]),
+                    }
+                    for field in metadata.get("fields") or []
+                ],
+            }
+        page_numbers = metadata.get("page_numbers") or []
+        return {
+            "document_id": item["document_id"],
+            "document_title": item.get("document_title"),
+            "page_number": metadata.get("start_page") or (page_numbers[0] if page_numbers else None),
+            "text": item["text"],
+            "content_type": content_type,
+            "table": table,
+        }
+
+    @staticmethod
+    def _unique_chunks(chunks: list[dict]) -> list[dict]:
+        """Keep the highest-ranked copy of each retrieved chunk."""
+        unique: list[dict] = []
+        seen_ids: set[str] = set()
+        seen_content: set[tuple[str, str]] = set()
+
+        for chunk in chunks:
+            chunk_id = str(chunk.get("chunk_id") or "")
+            content_key = (
+                str(chunk.get("document_id") or ""),
+                " ".join(str(chunk.get("text") or "").split()).casefold(),
+            )
+            if (chunk_id and chunk_id in seen_ids) or content_key in seen_content:
+                continue
+            if chunk_id:
+                seen_ids.add(chunk_id)
+            seen_content.add(content_key)
+            unique.append(chunk)
+
+        return unique
 
     def close(self) -> None:
         if self.vector_store is not None:

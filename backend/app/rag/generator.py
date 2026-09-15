@@ -130,6 +130,26 @@ for each answer.
 8. If the answer is not found in the context, say:
 "I could not find the answer in the provided document."
 
+9. Format the answer as clean Markdown for a web interface:
+
+- Start with a direct answer or one-sentence summary.
+- Use short descriptive headings only when the answer has
+  more than one distinct section.
+- Put every bullet or numbered item on its own line.
+- Use bullet lists for parallel facts, rates, conditions, or
+  options.
+- Use numbered lists only for steps, rankings, or an ordered
+  sequence.
+- Use nested bullets for subcategories such as different
+  locations, dates, or employee groups.
+- Use bold text sparingly for key labels and values.
+- Leave a blank line before and after every list.
+- Do not force a list when a short paragraph is clearer.
+- Do not add an "Answer" heading.
+
+10. Put the supporting document title on a final separate
+line in this format: **Source:** document title.
+
 Answer:
 """
 

@@ -28,6 +28,7 @@ tiktoken==0.13.0
 tqdm==4.70.0
 typing-inspection==0.4.3
 typing_extensions==4.16.0
+truststore>=0.10.4,<1
 tzdata==2026.3
 urllib3==2.7.0
 alembic>=1.16,<2

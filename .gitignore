@@ -33,6 +33,8 @@ project_tree.txt
 # Frontend build output
 frontend/node_modules/
 frontend/dist/
+frontend/.env
+frontend/.env.local
 
 # Test / migration caches
 .pytest_cache/

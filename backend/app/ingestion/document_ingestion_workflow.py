@@ -100,6 +100,7 @@ class DocumentIngestionWorkflow:
             self.importer.import_hierarchy(
                 document_id=document.id,
                 hierarchy=hierarchy,
+                owner_id=owner_id,
             )
             self.indexer.update_document_status(
                 document.id,
