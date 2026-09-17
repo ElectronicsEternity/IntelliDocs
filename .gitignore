@@ -39,3 +39,5 @@ frontend/.env.local
 # Test / migration caches
 .pytest_cache/
 .coverage
+
+backups/
