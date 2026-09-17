@@ -44,4 +44,16 @@ describe('IntelliDocsApi', () => {
     const retryOptions = fetchMock.mock.calls[1][1] as RequestInit
     expect((retryOptions.headers as Headers).get('Authorization')).toBe('Bearer fresh-token')
   })
+
+  it('loads the signed-in users usage summary', async () => {
+    const payload = { plan_code: 'trial', plan_name: 'Trial', documents: { used: 1, limit: 25 } }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      headers: { 'Content-Type': 'application/json' }, status: 200,
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = new IntelliDocsApi(async () => 'access-token', 'http://localhost:8000')
+
+    await expect(api.getUsage()).resolves.toEqual(payload)
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/usage', expect.any(Object))
+  })
 })

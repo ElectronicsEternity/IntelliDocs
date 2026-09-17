@@ -11,9 +11,16 @@ class FakeRepository:
     def __init__(self):
         self.record = None
         self.statuses = []
+        self.cleared = []
 
     def totals_for_user(self, user_id):
         return 0, 0
+
+    def fail_stale_processing(self, user_id, stale_after_seconds):
+        pass
+
+    def clear_processing_artifacts(self, document_id, user_id):
+        self.cleared.append((document_id, user_id))
 
     def create_uploaded(self, **values):
         from datetime import datetime, timezone
@@ -66,6 +73,12 @@ class FakeUsage:
 
     def record(self, user_id, event_type, **values):
         self.events.append((user_id, event_type, values))
+
+    def ensure_upload_allowed(self, user_id, **values):
+        pass
+
+    def ensure_processing_allowed(self, user_id, page_count):
+        pass
 
 
 class SuccessfulWorkflow:
@@ -137,7 +150,11 @@ def test_document_status_changes_to_ready():
         document_id="doc-a", user_id="user-a", original_filename="a.pdf",
         storage_path="users/user-a/documents/doc-a/a.pdf", file_size=8, file_hash="hash",
     )
-    service = DocumentService(repository, storage, usage, workflow_factory=SuccessfulWorkflow)
+    service = DocumentService(
+        repository, storage, usage,
+        workflow_factory=SuccessfulWorkflow,
+        page_counter=lambda _path: 3,
+    )
     result = service.process("doc-a", "user-a")
     assert repository.statuses == ["processing", "ready"]
     assert result["page_count"] == 3
@@ -149,9 +166,49 @@ def test_failed_processing_produces_failed_status():
         document_id="doc-a", user_id="user-a", original_filename="a.pdf",
         storage_path="users/user-a/documents/doc-a/a.pdf", file_size=8, file_hash="hash",
     )
-    service = DocumentService(repository, storage, usage, workflow_factory=FailedWorkflow)
+    service = DocumentService(
+        repository, storage, usage,
+        workflow_factory=FailedWorkflow,
+        page_counter=lambda _path: 3,
+    )
     with pytest.raises(HTTPException) as error:
         service.process("doc-a", "user-a")
     assert error.value.status_code == 500
     assert repository.statuses == ["processing", "failed"]
-    assert repository.record["processing_error"] == "parser rejected encrypted PDF"
+    assert repository.record["processing_error"] == (
+        "This PDF is password-protected or encrypted. Upload an unlocked copy and retry."
+    )
+
+
+def test_retry_clears_partial_processing_artifacts():
+    repository, storage, usage = FakeRepository(), FakeStorage(), FakeUsage()
+    repository.create_uploaded(
+        document_id="doc-a", user_id="user-a", original_filename="a.pdf",
+        storage_path="users/user-a/documents/doc-a/a.pdf", file_size=8, file_hash="hash",
+    )
+    repository.record["processing_status"] = "failed"
+    service = DocumentService(
+        repository, storage, usage,
+        workflow_factory=SuccessfulWorkflow,
+        page_counter=lambda _path: 3,
+    )
+
+    service.process("doc-a", "user-a")
+
+    assert repository.cleared == [("doc-a", "user-a")]
+
+
+@pytest.mark.anyio
+async def test_upload_uses_plan_specific_limits():
+    class RejectingUsage(FakeUsage):
+        def ensure_upload_allowed(self, user_id, **values):
+            raise HTTPException(429, "Your Trial plan document limit has been reached.")
+
+    service = DocumentService(FakeRepository(), FakeStorage(), RejectingUsage())
+    upload = UploadFile(filename="contract.pdf", file=BytesIO(b"%PDF-1.4"))
+
+    with pytest.raises(HTTPException) as error:
+        await service.upload(upload, "user-a")
+
+    assert error.value.status_code == 429
+    assert "Trial plan" in str(error.value.detail)

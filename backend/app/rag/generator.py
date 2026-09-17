@@ -6,6 +6,7 @@ from openai import OpenAI
 
 from app.config import settings
 from app.constants import CHAT_MODEL
+from app.services.usage.ai_usage import tracked_ai_call
 
 
 class Generator:
@@ -154,8 +155,9 @@ Answer:
 """
 
         # Generate answer
-        response = (
-            self.client.chat.completions.create(
+        self.last_usage = {}
+        response = tracked_ai_call(
+            lambda: self.client.chat.completions.create(
                 model=CHAT_MODEL,
                 messages=[
                     {
@@ -163,7 +165,8 @@ Answer:
                         "content": prompt
                     }
                 ]
-            )
+            ),
+            activity="chat", model=CHAT_MODEL,
         )
 
         if response.usage is not None:

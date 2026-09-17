@@ -2,7 +2,8 @@
 
 React, Vite, and TypeScript frontend for IntelliDocs. Supabase is used in the
 browser only for authentication; document storage, database access, processing,
-and RAG requests go through FastAPI.
+RAG requests, plan limits, and usage summaries go through FastAPI. The Usage view
+shows the signed-in user's current plan and remaining allowances.
 
 ## Setup
 

@@ -32,8 +32,17 @@ class FakeConversations:
 
 
 class FakeUsage:
+    def ensure_question_allowed(self, user_id):
+        pass
+
     def record(self, *args, **kwargs):
         pass
+
+
+class LimitReachedUsage(FakeUsage):
+    def ensure_question_allowed(self, user_id):
+        from fastapi import HTTPException
+        raise HTTPException(429, "Your Trial plan monthly question limit has been reached.")
 
 
 def test_rag_retrieval_uses_authenticated_owner_only():
@@ -49,6 +58,24 @@ def test_rag_retrieval_uses_authenticated_owner_only():
     )
     assert retriever.owner_id == "user-a"
     assert result["sources"][0]["document_id"] == "doc-a"
+
+
+def test_rag_question_limit_is_checked_before_retrieval():
+    retriever = FakeRetriever()
+    service = RagService(
+        retriever=retriever,
+        generator=FakeGenerator(),
+        conversations=FakeConversations(),
+        usage=LimitReachedUsage(),
+    )
+
+    import pytest
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as error:
+        service.chat(question="question", user_id="user-a", conversation_id=None, top_k=5)
+
+    assert error.value.status_code == 429
+    assert retriever.owner_id is None
 
 
 def test_retriever_scopes_every_search_path_to_owner():

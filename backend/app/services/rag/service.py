@@ -9,6 +9,7 @@ from app.rag.generator import Generator
 from app.rag.retriever import Retriever
 from app.storage.postgres_vector_store import PostgresVectorStore
 from app.services.usage.tracker import UsageTracker
+from app.services.usage.ai_usage import ai_usage_context
 
 
 class ConversationRepository:
@@ -79,15 +80,17 @@ class RagService:
         self.usage = usage or UsageTracker()
 
     def chat(self, *, question: str, user_id: str, conversation_id: str | None, top_k: int | None) -> dict:
+        self.usage.ensure_question_allowed(user_id)
         conversation_id = self.conversations.ensure(user_id, conversation_id)
-        chunks = self._unique_chunks(
-            self.retriever.retrieve(
-                question=question,
-                owner_id=user_id,
-                top_k=top_k or settings.RAG_TOP_K,
+        with ai_usage_context(user_id=user_id, conversation_id=conversation_id):
+            chunks = self._unique_chunks(
+                self.retriever.retrieve(
+                    question=question,
+                    owner_id=user_id,
+                    top_k=top_k or settings.RAG_TOP_K,
+                )
             )
-        )
-        answer = self.generator.generate(question=question, chunks=chunks)
+            answer = self.generator.generate(question=question, chunks=chunks)
         usage = getattr(self.generator, "last_usage", {}) or {}
         self.conversations.add_message(conversation_id, user_id, "user", question)
         self.conversations.add_message(

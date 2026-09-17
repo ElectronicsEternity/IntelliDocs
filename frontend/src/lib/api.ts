@@ -1,4 +1,4 @@
-import type { ChatResponse, DocumentRecord } from '../types/api'
+import type { ChatResponse, DocumentRecord, UsageSummary } from '../types/api'
 
 interface ErrorPayload {
   detail?: string
@@ -57,6 +57,10 @@ export class IntelliDocsApi {
   async listDocuments(): Promise<DocumentRecord[]> {
     const response = await this.request<{ documents: DocumentRecord[] }>('/documents')
     return response.documents
+  }
+
+  getUsage(): Promise<UsageSummary> {
+    return this.request('/usage')
   }
 
   uploadDocument(file: File): Promise<DocumentRecord> {

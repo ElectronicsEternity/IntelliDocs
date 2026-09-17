@@ -17,6 +17,7 @@
 
 from app.constants import SIMILARITY_THRESHOLD, TOP_K
 from app.rag.embedder import Embedder
+from app.services.usage.ai_usage import ai_usage_context
 from app.storage.postgres_vector_store import (
     PostgresVectorStore,
 )
@@ -43,9 +44,8 @@ class Retriever:
         owner_id: str,
         top_k: int = TOP_K,
     ) -> list[dict]:
-        question_embedding = (
-            self.embedder.generate_embedding(question)
-        )
+        with ai_usage_context(user_id=owner_id, embedding_activity="query_embedding"):
+            question_embedding = self.embedder.generate_embedding(question)
 
         # Search all chunks directly by meaning.
         vector_results = self.vector_store.search(

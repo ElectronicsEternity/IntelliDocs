@@ -17,6 +17,26 @@ Supabase Storage bucket stores source PDFs.
 The health check is available at `GET /health`. All document and chat endpoints
 require `Authorization: Bearer <supabase-access-token>`.
 
+## Account plans and usage
+
+`ai_usage` records each profiling attempt, chunk/node/query embedding response,
+and chat response. It stores provider token counts, cached/reasoning breakdowns,
+user/document/conversation identifiers, rate snapshots, and estimated USD cost.
+Prices are maintained in `app/config.py`. Reasoning tokens are already included
+in output tokens and are not billed twice. Missing usage or API errors have a
+NULL cost, not zero. Prompts, document text, keys, and error messages are not saved.
+Usage history survives document deletion. OpenAI's bill remains authoritative;
+SDK-internal retries without reported usage cannot be measured individually.
+
+New authenticated users are assigned the `trial` plan when they first load usage
+or perform a limited action. Trial and Pro allowances are configured with the
+`TRIAL_*` and `PRO_*` environment variables in `.env.example`. IntelliDocs
+enforces document, storage, monthly page-processing, and monthly question limits.
+
+Payments and automatic plan upgrades are intentionally not implemented yet. Until
+that change set is added, an administrator can assign a test account to Pro in
+PostgreSQL by changing its `user_accounts.plan_code` from `trial` to `pro`.
+
 ## Supabase setup
 
 Create a private Storage bucket matching `SUPABASE_STORAGE_BUCKET` (default:

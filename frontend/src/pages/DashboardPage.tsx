@@ -3,10 +3,11 @@ import { useMemo, useState } from 'react'
 import { useAuth } from '../auth/AuthProvider'
 import { ChatPanel } from '../components/ChatPanel'
 import { DocumentPanel } from '../components/DocumentPanel'
+import { UsagePanel } from '../components/UsagePanel'
 import { IntelliDocsApi } from '../lib/api'
 import { supabase } from '../lib/supabase'
 
-type View = 'documents' | 'chat'
+type View = 'documents' | 'chat' | 'usage'
 
 export function DashboardPage() {
   const { session, signOut } = useAuth()
@@ -40,6 +41,7 @@ export function DashboardPage() {
         <nav className="main-nav" aria-label="Workspace">
           <button className={view === 'documents' ? 'active' : ''} onClick={() => setView('documents')}>Documents</button>
           <button className={view === 'chat' ? 'active' : ''} onClick={() => setView('chat')}>Ask</button>
+          <button className={view === 'usage' ? 'active' : ''} onClick={() => setView('usage')}>Usage</button>
         </nav>
         <div className="account-menu">
           <span className="avatar" aria-hidden="true">{email.charAt(0).toUpperCase()}</span>
@@ -47,7 +49,11 @@ export function DashboardPage() {
           <button className="text-button" disabled={signingOut} onClick={() => void handleSignOut()}>{signingOut ? 'Signing out…' : 'Sign out'}</button>
         </div>
       </header>
-      <main className="workspace">{view === 'documents' ? <DocumentPanel api={api} /> : <ChatPanel api={api} />}</main>
+      <main className="workspace">
+        {view === 'documents' && <DocumentPanel api={api} />}
+        {view === 'chat' && <ChatPanel api={api} />}
+        {view === 'usage' && <UsagePanel api={api} />}
+      </main>
     </div>
   )
 }

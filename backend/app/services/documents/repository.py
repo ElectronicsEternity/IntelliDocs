@@ -67,6 +67,47 @@ class DocumentRepository:
             )
             return [dict(row) for row in cur.fetchall()]
 
+    def fail_stale_processing(self, user_id: str, stale_after_seconds: int) -> None:
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE documents
+                SET processing_status = 'failed',
+                    processing_error = %s,
+                    updated_at = NOW()
+                WHERE user_id = %s
+                  AND processing_status = 'processing'
+                  AND updated_at < NOW() - (%s * interval '1 second')
+                """,
+                (
+                    "The previous processing attempt was interrupted. Please retry.",
+                    user_id,
+                    stale_after_seconds,
+                ),
+            )
+            cur.execute(
+                """
+                UPDATE document_analysis da
+                SET processing_status = 'failed',
+                    error_message = %s,
+                    updated_at = NOW()
+                FROM documents d
+                WHERE da.document_id = d.id
+                  AND da.user_id = %s
+                  AND d.user_id = %s
+                  AND d.processing_status = 'failed'
+                  AND d.processing_error = %s
+                  AND da.error_message IS DISTINCT FROM %s
+                """,
+                (
+                    "The previous processing attempt was interrupted. Please retry.",
+                    user_id,
+                    user_id,
+                    "The previous processing attempt was interrupted. Please retry.",
+                    "The previous processing attempt was interrupted. Please retry.",
+                ),
+            )
+
     def get_for_user(self, document_id: str, user_id: str) -> dict[str, Any] | None:
         with get_connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
@@ -108,6 +149,26 @@ class DocumentRepository:
                 WHERE document_id = %s AND user_id = %s
                 """,
                 (status, error, document_id, user_id),
+            )
+
+    def clear_processing_artifacts(self, document_id: str, user_id: str) -> None:
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM chunks
+                WHERE document_id = %s AND user_id = %s
+                """,
+                (document_id, user_id),
+            )
+            cur.execute(
+                """
+                DELETE FROM document_nodes n
+                USING documents d
+                WHERE n.document_id = d.id
+                  AND n.document_id = %s
+                  AND d.user_id = %s
+                """,
+                (document_id, user_id),
             )
 
     def delete_for_user(self, document_id: str, user_id: str) -> bool:

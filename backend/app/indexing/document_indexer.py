@@ -201,7 +201,10 @@ class DocumentIndexer:
 
                 embedding = (
                     self.embedder.generate_embedding(
-                        chunk.text
+                        chunk.text,
+                        user_id=document.owner_id,
+                        document_id=document.id,
+                        activity="chunk_embedding",
                     )
                 )
 
@@ -223,7 +226,10 @@ class DocumentIndexer:
 
                     node_embedding = (
                         self.embedder.generate_embedding(
-                            search_text
+                            search_text,
+                            user_id=document.owner_id,
+                            document_id=document.id,
+                            activity="node_embedding",
                         )
                     )
                     self.vector_store.add_node_embedding(

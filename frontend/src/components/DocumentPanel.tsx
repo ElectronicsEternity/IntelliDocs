@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { ApiError, type IntelliDocsApi } from "../lib/api";
 import type { DocumentRecord } from "../types/api";
@@ -29,20 +29,27 @@ export function DocumentPanel({ api }: Props) {
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function loadDocuments() {
+  const loadDocuments = useCallback(async (silent = false) => {
     try {
       setError("");
       setDocuments(await api.listDocuments());
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }
+  }, [api]);
 
   useEffect(() => {
     void loadDocuments();
-  }, [api]);
+  }, [loadDocuments]);
+
+  const hasProcessingDocument = documents.some((document) => document.processing_status === "processing");
+  useEffect(() => {
+    if (!hasProcessingDocument) return;
+    const timer = window.setInterval(() => void loadDocuments(true), 4000);
+    return () => window.clearInterval(timer);
+  }, [hasProcessingDocument, loadDocuments]);
 
   async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -61,7 +68,7 @@ export function DocumentPanel({ api }: Props) {
       setUploading(true);
       setError("");
       await api.uploadDocument(file);
-      await loadDocuments();
+      await loadDocuments(true);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -74,7 +81,7 @@ export function DocumentPanel({ api }: Props) {
       setBusyId(id);
       setError("");
       await api.processDocument(id);
-      await loadDocuments();
+      await loadDocuments(true);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -139,6 +146,9 @@ export function DocumentPanel({ api }: Props) {
                 {formatBytes(document.file_size)} · {document.page_count ? `${document.page_count} pages · ` : ""}{formatDate(document.created_at)}
               </p>
               {document.processing_error && <p className="card-error">{document.processing_error}</p>}
+              {document.processing_status === "processing" && (
+                <p className="processing-note">Processing can take several minutes. This page will refresh automatically.</p>
+              )}
               <div className="card-actions">
                 {document.processing_status !== "ready" && (
                   <button
@@ -149,7 +159,7 @@ export function DocumentPanel({ api }: Props) {
                   >
                     {busyId === document.id || document.processing_status === "processing" ? (
                       <><span aria-hidden="true" className="button-spinner" />Processing…</>
-                    ) : "Process"}
+                    ) : document.processing_status === "failed" ? "Retry processing" : "Process"}
                   </button>
                 )}
                 <button className="text-button danger" disabled={busyId === document.id} onClick={() => void deleteDocument(document)}>

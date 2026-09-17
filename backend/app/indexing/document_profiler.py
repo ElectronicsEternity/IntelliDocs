@@ -24,6 +24,7 @@ from openai import OpenAI
 
 from app.config import settings
 from app.constants import DOCUMENT_PROFILER_MODEL
+from app.services.usage.ai_usage import tracked_ai_call
 from app.indexing.document_profile_validator import (
     DocumentProfileValidationError,
     DocumentProfileValidator,
@@ -92,9 +93,10 @@ class DocumentProfiler:
                 )
 
             # Send the current attempt to OpenAI.
-            response = self.client.responses.create(
-                model=DOCUMENT_PROFILER_MODEL,
-                input=prompt
+            response = tracked_ai_call(
+                lambda: self.client.responses.create(model=DOCUMENT_PROFILER_MODEL, input=prompt),
+                activity="profiling", model=DOCUMENT_PROFILER_MODEL,
+                user_id=owner_id, document_id=document_id, attempt=attempt,
             )
             # Preserve the exact response before parsing it.
             raw_output = response.output_text

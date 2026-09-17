@@ -36,3 +36,19 @@ export interface ChatResponse {
   answer: string
   sources: ChatSource[]
 }
+
+export interface UsageMetric {
+  used: number
+  limit: number
+}
+
+export interface UsageSummary {
+  plan_code: 'trial' | 'pro'
+  plan_name: string
+  period_start: string
+  period_end: string
+  documents: UsageMetric
+  storage_bytes: UsageMetric
+  pages_processed: UsageMetric
+  questions: UsageMetric
+}
