@@ -55,9 +55,26 @@ class DocumentService:
                 "We could not reliably map this document's structure. "
                 "Please retry processing."
             )
+        if "page mapping resolved 0" in message or "page hint" in message:
+            return (
+                "Hierarchy retrieval completed, but no section locations could "
+                "be verified. Processing stopped before table extraction."
+            )
+        if "table" in message and (
+            "matched" in message
+            or "table extraction validation failed" in message
+            or "table profile validation failed" in message
+        ):
+            return (
+                "Table extraction completed, but the extracted table could not "
+                "be linked safely to the document hierarchy."
+            )
         if "invalid pdf" in message or "invalid xref" in message or "damaged" in message or "corrupt" in message:
             return "This PDF appears to be damaged or unreadable. Try exporting it again and retry."
-        return "We could not process this PDF. You can retry, or upload a newly exported copy."
+        return (
+            "Processing stopped unexpectedly. The backend error log contains "
+            "the failed stage and stack trace."
+        )
 
     async def upload(self, upload: UploadFile, user_id: str) -> dict:
         filename = Path(upload.filename or "").name

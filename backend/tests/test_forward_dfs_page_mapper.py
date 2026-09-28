@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from uuid import uuid4
 
 from app.indexing.forward_dfs_page_mapper import ForwardDFSPageMapper
 from app.indexing.node_scope_extractor import NodeScopeExtractor
@@ -184,3 +185,43 @@ def test_part_title_repetition_does_not_steal_section_heading():
     result = ForwardDFSPageMapper(Repository(nodes)).map_document(doc, {'a': 1}, opening_texts={'a': 'Regulations'})
     assert not result['unresolved']
     assert nodes[0].start_character == text.index('Regulations')
+
+
+def test_string_metadata_keys_match_uuid_ids_returned_by_postgres():
+    identity = uuid4()
+    nodes = [node(identity, 'Alpha')]
+    doc = SimpleNamespace(
+        id='doc',
+        pages=[Page(1, 'Alpha body')],
+        total_pages=1,
+    )
+
+    result = ForwardDFSPageMapper(Repository(nodes)).map_document(
+        doc,
+        {str(identity): 1},
+        opening_texts={str(identity): 'Alpha'},
+    )
+
+    assert not result['unresolved']
+    assert nodes[0].start_page == 1
+    assert nodes[0].start_character == 0
+
+
+def test_table_uses_string_keyed_start_page_hint():
+    identity = uuid4()
+    table = DocumentNode(identity, 'doc', None, 'TABLE', '', '', 0, 0)
+    doc = SimpleNamespace(
+        id='doc',
+        pages=[Page(1, 'body'), Page(2, 'table')],
+        total_pages=2,
+    )
+
+    result = ForwardDFSPageMapper(Repository([table])).map_document(
+        doc,
+        {str(identity): 2},
+    )
+
+    assert not result['unresolved']
+    assert table.start_page == 2
+    assert table.end_page == 2
+    assert table.start_character is None

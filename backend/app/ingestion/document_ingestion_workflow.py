@@ -74,6 +74,7 @@ class DocumentIngestionWorkflow:
         )
         if document.total_pages > settings.MAX_PAGES_PER_DOCUMENT:
             raise ValueError("Document exceeds the configured page limit.")
+        print(f"Stage parse: {document.total_pages} physical page(s) extracted.")
 
         # Stop before paid work when this file already exists.
         if register_document and not self.indexer.register_document(document):
@@ -102,6 +103,7 @@ class DocumentIngestionWorkflow:
                 owner_id=owner_id,
                 page_count=document.total_pages,
             )
+            print("Stage hierarchy: validated profile received.")
 
             # Convert hierarchy JSON into database nodes.
             mapping_metadata = self.importer.import_hierarchy(
@@ -116,11 +118,21 @@ class DocumentIngestionWorkflow:
             )
 
             # Locate node pages and character positions.
-            self.page_mapper.map_document(
+            mapping_report = self.page_mapper.map_document(
                 document,
                 page_hints=mapping_metadata["page_hints"],
                 opening_texts=mapping_metadata["opening_texts"],
             )
+            print(
+                "Stage mapping: "
+                f"{mapping_report['resolved']} text anchor(s) resolved; "
+                f"{len(mapping_report['unresolved'])} node(s) unresolved."
+            )
+            if mapping_report["resolved"] == 0:
+                raise ValueError(
+                    "Page mapping resolved 0 searchable hierarchy nodes; "
+                    "processing stopped before table extraction."
+                )
             self.indexer.update_page_mapping_version(
                 document.id,
                 CURRENT_PAGE_MAPPING_VERSION,
@@ -138,6 +150,20 @@ class DocumentIngestionWorkflow:
                 owner_id=owner_id,
                 document_id=document.id,
             )
+            print(
+                f"Stage tables: {len(normalized_tables)} logical table(s) extracted."
+            )
+
+            # The hierarchy pass owns table start pages; the visual table pass
+            # owns complete table ranges. Reconcile and persist both before
+            # chunk construction so the linker sees the same verified ranges.
+            if normalized_tables:
+                self.indexer.table_node_linker.link_tables(
+                    normalized_tables=normalized_tables,
+                    nodes=nodes,
+                )
+                self.node_repository.bulk_update_page_ranges(nodes)
+                print("Stage tables: hierarchy table ranges reconciled.")
 
             # Build and persist structured retrieval data.
             self.indexer.index_document(
@@ -145,6 +171,7 @@ class DocumentIngestionWorkflow:
                 nodes=nodes,
                 normalized_tables=normalized_tables,
             )
+            print("Stage index: chunks and embeddings persisted.")
 
         # Mark the registered document when processing fails.
         except Exception:

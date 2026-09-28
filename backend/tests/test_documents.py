@@ -205,6 +205,15 @@ def test_mapping_failure_is_not_reported_as_a_damaged_pdf():
     )
 
 
+def test_table_link_failure_names_the_failed_stage():
+    error = ValueError("Table 1 on pages 3-3 matched 0 TABLE nodes.")
+
+    assert DocumentService._public_processing_error(error) == (
+        "Table extraction completed, but the extracted table could not "
+        "be linked safely to the document hierarchy."
+    )
+
+
 def test_retry_clears_partial_processing_artifacts():
     repository, storage, usage = FakeRepository(), FakeStorage(), FakeUsage()
     repository.create_uploaded(

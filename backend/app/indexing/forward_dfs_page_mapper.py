@@ -6,6 +6,15 @@ from app.indexing.candidate_page_mapper import CandidatePageMapper
 
 class ForwardDFSPageMapper(CandidatePageMapper):
     @staticmethod
+    def _metadata_value(values, node_id):
+        """Read metadata keyed before UUID values round-trip through Postgres."""
+        if not values:
+            return None
+        if node_id in values:
+            return values[node_id]
+        return values.get(str(node_id))
+
+    @staticmethod
     def identifier_confirms(node, page, start):
         """Require the identifier in the opening or adjacent printed heading.
 
@@ -88,12 +97,26 @@ class ForwardDFSPageMapper(CandidatePageMapper):
         for node in ordered:
             previous_cursor = cursor
             node.start_page = node.start_character = node.end_page = None
-            opening = (opening_texts or {}).get(node.id)
+            opening = self._metadata_value(opening_texts, node.id)
             anchor = opening.strip() if isinstance(opening, str) and opening.strip() else ((node.title or '').strip() or (node.identifier or '').strip())
-            if node.node_type.upper() == 'TABLE' or not anchor:
+            hint = self._metadata_value(page_hints, node.id)
+            if node.node_type.upper() == 'TABLE':
+                if type(hint) is int and hint in pages:
+                    # Table geometry later refines end_page. Retain the exact
+                    # hierarchy start hint so the extracted matrix can be linked.
+                    node.start_page = hint
+                    node.end_page = hint
+                else:
+                    failures.append({
+                        'id': str(node.id),
+                        'title': node.title,
+                        'identifier': node.identifier,
+                        'reason': 'invalid or missing table page hint',
+                    })
+                continue
+            if not anchor:
                 continue
             anchors.append(node)
-            hint = page_hints.get(node.id)
             reason = None
             if type(hint) is not int or hint not in pages:
                 reason = 'invalid or missing page hint'
@@ -151,7 +174,7 @@ class ForwardDFSPageMapper(CandidatePageMapper):
                     # Rejected matches must not advance the search cursor.
                     cursor = previous_cursor
             if reason:
-                failures.append({'id': node.id, 'title': node.title, 'identifier': node.identifier, 'reason': reason})
+                failures.append({'id': str(node.id), 'title': node.title, 'identifier': node.identifier, 'reason': reason})
 
         # Ranges are calculated after searching; they do not constrain searches.
         def end(node):
@@ -164,7 +187,7 @@ class ForwardDFSPageMapper(CandidatePageMapper):
         for node in ordered:
             if node.start_character is not None:
                 node.end_page = end(node)
-            elif node not in anchors:
+            elif node not in anchors and node.node_type.upper() != 'TABLE':
                 parent = lookup.get(node.parent_id)
                 node.start_page = parent.start_page if parent else min(pages)
                 node.end_page = parent.end_page if parent else last.page_number
