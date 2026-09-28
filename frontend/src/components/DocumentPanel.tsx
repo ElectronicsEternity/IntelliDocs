@@ -84,6 +84,11 @@ export function DocumentPanel({ api }: Props) {
       await loadDocuments(true);
     } catch (caught) {
       setError(errorMessage(caught));
+      try {
+        setDocuments(await api.listDocuments());
+      } catch {
+        // Preserve the processing error when refreshing the card also fails.
+      }
     } finally {
       setBusyId(null);
     }

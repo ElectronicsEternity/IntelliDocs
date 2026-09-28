@@ -319,10 +319,24 @@ class DocumentIndexer:
                 recommended_chunk_size,
             )
 
+        table_node_ids = []
+        if normalized_tables:
+            table_node_ids = self.table_node_linker.link_tables(
+                normalized_tables=normalized_tables,
+                nodes=nodes,
+            )
+
         scopes = self.scope_extractor.extract_node_scopes(
             document=document,
             nodes=nodes,
         )
+        if table_node_ids:
+            table_owner_ids = set(table_node_ids)
+            scopes = [
+                scope
+                for scope in scopes
+                if scope["node_id"] not in table_owner_ids
+            ]
         chunks = self.chunker.chunk_node_scopes(
             document=document,
             scopes=scopes,
@@ -335,10 +349,6 @@ class DocumentIndexer:
                 nodes=nodes,
             )
 
-        table_node_ids = self.table_node_linker.link_tables(
-            normalized_tables=normalized_tables,
-            nodes=nodes,
-        )
         table_chunks = self.chunker.chunk_tables(
             document=document,
             normalized_tables=normalized_tables,

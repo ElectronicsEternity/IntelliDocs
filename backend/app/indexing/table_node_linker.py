@@ -24,6 +24,8 @@ from collections import defaultdict
 
 class TableNodeLinker:
 
+    TABLE_OWNER_TYPES = {"SCHEDULE", "HEADING"}
+
     @staticmethod
     def _document_order(nodes: list[DocumentNode]) -> list[DocumentNode]:
         """Return TABLE nodes in hierarchy DFS order, not SQL depth order."""
@@ -59,6 +61,11 @@ class TableNodeLinker:
 
         # Keep only hierarchy nodes representing tables.
         table_nodes = self._document_order(nodes)
+        structural_owners = [
+            node
+            for node in nodes
+            if node.node_type.upper() in self.TABLE_OWNER_TYPES
+        ]
 
         # When several tables begin on one page, both model passes must report
         # the same count. Only then may document order break the tie safely.
@@ -119,12 +126,32 @@ class TableNodeLinker:
                     else None
                 )
 
+            # Some legal schedules and amendment lists are physically tables
+            # but correctly remain SCHEDULE/HEADING nodes in the hierarchy.
+            # An exact, unique page-range owner is strong enough to link without
+            # inventing a duplicate TABLE node.
+            structural_candidates = []
+            if matched_node is None:
+                structural_candidates = [
+                    node
+                    for node in structural_owners
+                    if (
+                        node.start_page == start_page
+                        and node.end_page == end_page
+                        and node.id not in used_node_ids
+                    )
+                ]
+                if len(structural_candidates) == 1:
+                    matched_node = structural_candidates[0]
+
             # Reject guesses that could select a wrong branch.
             if matched_node is None:
                 raise ValueError(
                     f"Table {table_number} on pages "
                     f"{start_page}-{end_page} matched "
-                    f"{len(candidates)} TABLE nodes."
+                    f"{len(candidates)} TABLE nodes and "
+                    f"{len(structural_candidates)} "
+                    "structural table owners."
                 )
 
             # The visual table pass owns the complete physical range.

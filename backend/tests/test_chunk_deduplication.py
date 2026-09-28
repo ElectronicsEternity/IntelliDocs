@@ -58,3 +58,28 @@ def test_indexer_deduplicates_before_persistence_and_embedding():
     indexer.embedder.generate_embedding.assert_called_once_with(
         first.text, user_id='owner', document_id='doc', activity='chunk_embedding')
     indexer.vector_store.add_embedding.assert_called_once()
+
+
+def test_structured_table_owner_is_not_also_chunked_as_raw_text():
+    indexer = DocumentIndexer.__new__(DocumentIndexer)
+    indexer.table_node_linker = Mock()
+    indexer.table_node_linker.link_tables.return_value = ['schedule']
+    indexer.scope_extractor = Mock()
+    indexer.scope_extractor.extract_node_scopes.return_value = [
+        {'node_id': 'schedule', 'text': 'raw table text'},
+        {'node_id': 'section', 'text': 'ordinary section'},
+    ]
+    indexer.chunker = Mock()
+    indexer.chunker.chunk_node_scopes.return_value = []
+    indexer.chunker.chunk_tables.return_value = []
+    indexer.chunker.order_chunks_by_hierarchy.return_value = []
+
+    indexer._build_chunks(
+        document=SimpleNamespace(),
+        nodes=[SimpleNamespace(id='schedule')],
+        normalized_tables=[{'page_numbers': [112, 113]}],
+        recommended_chunk_size=None,
+    )
+
+    passed_scopes = indexer.chunker.chunk_node_scopes.call_args.kwargs['scopes']
+    assert passed_scopes == [{'node_id': 'section', 'text': 'ordinary section'}]

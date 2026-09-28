@@ -33,4 +33,25 @@ describe('DocumentPanel', () => {
     expect(screen.getByRole('button', { name: 'Processing…' })).toHaveAttribute('aria-busy', 'true')
     expect(screen.getByRole('button', { name: 'Processing…' }).querySelector('.button-spinner')).not.toBeNull()
   })
+
+  it('refreshes a stale card after processing fails', async () => {
+    const failedRecord = {
+      ...documentRecord,
+      processing_status: 'failed',
+      processing_error: 'Table linking failed.',
+    } as DocumentRecord
+    const api = {
+      listDocuments: vi.fn()
+        .mockResolvedValueOnce([documentRecord])
+        .mockResolvedValueOnce([failedRecord]),
+      processDocument: vi.fn().mockRejectedValue(new Error('Table linking failed.')),
+    } as unknown as IntelliDocsApi
+
+    render(<DocumentPanel api={api} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Process' }))
+
+    expect(await screen.findByRole('button', { name: 'Retry processing' })).toBeInTheDocument()
+    expect(screen.getAllByText('Table linking failed.')).toHaveLength(2)
+    expect(api.listDocuments).toHaveBeenCalledTimes(2)
+  })
 })

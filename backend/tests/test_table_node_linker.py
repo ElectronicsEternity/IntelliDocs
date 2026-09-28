@@ -41,5 +41,28 @@ def test_same_page_tables_link_only_when_counts_agree():
 def test_same_page_count_mismatch_is_rejected():
     nodes, _tables = hierarchy_with_tables(3, 3)
 
-    with pytest.raises(ValueError, match='matched 2 TABLE nodes'):
+    with pytest.raises(ValueError, match='matched 2 TABLE nodes and 0 structural'):
         TableNodeLinker().link_tables([matrix(3)], nodes)
+
+
+def test_exact_schedule_range_can_own_a_physical_table():
+    root = DocumentNode('root', 'doc', None, 'DOCUMENT', '', '', 0, 0, 1, None, 127)
+    schedule = DocumentNode(
+        'schedule', 'doc', 'root', 'SCHEDULE', 'FIRST SCHEDULE',
+        '[Subsection 2(1)]', 0, 1, 112, 163, 113,
+    )
+
+    linked = TableNodeLinker().link_tables([matrix(112, 113)], [root, schedule])
+
+    assert linked == ['schedule']
+
+
+def test_structural_owner_requires_an_exact_unique_range():
+    root = DocumentNode('root', 'doc', None, 'DOCUMENT', '', '', 0, 0, 1, None, 127)
+    schedule = DocumentNode(
+        'schedule', 'doc', 'root', 'SCHEDULE', 'FIRST SCHEDULE',
+        '', 0, 1, 112, 163, 114,
+    )
+
+    with pytest.raises(ValueError, match='0 structural table owners'):
+        TableNodeLinker().link_tables([matrix(112, 113)], [root, schedule])
