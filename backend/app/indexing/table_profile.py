@@ -69,6 +69,11 @@ Do not report a contents list, ordinary two-column prose, signature block, or a
 schedule heading by itself as a table. Treat one table continuing over several
 pages as one logical table.
 
+Include genuine data tables in front matter, appendices, schedules, or other
+standalone locations even when they do not belong to a legal section or heading.
+Do not invent a hierarchy parent. Return their physical page range and table
+data normally; the application resolves hierarchy ownership locally.
+
 For every table:
 - Copy its printed title verbatim. If it has no title, provide a short stable
   label using its closest printed schedule/section heading.

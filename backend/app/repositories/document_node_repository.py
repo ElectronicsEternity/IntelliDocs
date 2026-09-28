@@ -331,3 +331,22 @@ class DocumentNodeRepository:
                     self._owner(),
                 )
             )
+
+    def bulk_update_sequence_numbers(
+        self,
+        nodes: list[DocumentNode],
+    ) -> None:
+        query = """
+        UPDATE document_nodes
+        SET sequence_no = %s
+        WHERE id = %s AND EXISTS (
+            SELECT 1 FROM documents d
+            WHERE d.id = document_nodes.document_id AND d.user_id = %s
+        )
+        """
+        values = [
+            (node.sequence_no, node.id, self._owner())
+            for node in nodes
+        ]
+        if values:
+            self.db.executemany(query, values)

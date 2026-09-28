@@ -158,9 +158,33 @@ class DocumentIngestionWorkflow:
             # owns complete table ranges. Reconcile and persist both before
             # chunk construction so the linker sees the same verified ranges.
             if normalized_tables:
+                existing_ids = {node.id for node in nodes}
+                existing_sequences = {
+                    node.id: node.sequence_no for node in nodes
+                }
                 self.indexer.table_node_linker.link_tables(
                     normalized_tables=normalized_tables,
                     nodes=nodes,
+                )
+                synthetic_nodes = [
+                    node for node in nodes if node.id not in existing_ids
+                ]
+                changed_siblings = [
+                    node
+                    for node in nodes
+                    if (
+                        node.id in existing_ids
+                        and node.sequence_no != existing_sequences[node.id]
+                    )
+                ]
+                if synthetic_nodes:
+                    self.node_repository.bulk_create(synthetic_nodes)
+                    print(
+                        "Stage tables: "
+                        f"{len(synthetic_nodes)} standalone table node(s) created."
+                    )
+                self.node_repository.bulk_update_sequence_numbers(
+                    changed_siblings
                 )
                 self.node_repository.bulk_update_page_ranges(nodes)
                 print("Stage tables: hierarchy table ranges reconciled.")

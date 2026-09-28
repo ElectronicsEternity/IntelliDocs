@@ -16,6 +16,7 @@
 
 from app.models.document_node import DocumentNode
 from collections import defaultdict
+from uuid import NAMESPACE_URL, uuid5
 
 
 # ==========================================================
@@ -25,6 +26,97 @@ from collections import defaultdict
 class TableNodeLinker:
 
     TABLE_OWNER_TYPES = {"SCHEDULE", "HEADING"}
+
+    @staticmethod
+    def _standalone_parent(
+        nodes: list[DocumentNode],
+        start_page: int,
+        end_page: int,
+    ) -> DocumentNode:
+        candidates = [
+            node
+            for node in nodes
+            if (
+                node.node_type.upper() != "TABLE"
+                and node.start_page is not None
+                and node.end_page is not None
+                and node.start_page <= start_page
+                and node.end_page >= end_page
+            )
+        ]
+        if not candidates:
+            raise ValueError(
+                f"Standalone table on pages {start_page}-{end_page} "
+                "has no containing hierarchy node."
+            )
+        best_depth = max(node.depth for node in candidates)
+        deepest = [node for node in candidates if node.depth == best_depth]
+        smallest_span = min(
+            node.end_page - node.start_page for node in deepest
+        )
+        closest = [
+            node
+            for node in deepest
+            if node.end_page - node.start_page == smallest_span
+        ]
+        if len(closest) != 1:
+            raise ValueError(
+                f"Standalone table on pages {start_page}-{end_page} "
+                f"has {len(closest)} equally specific hierarchy parents."
+            )
+        return closest[0]
+
+    @staticmethod
+    def _resequence_children(
+        nodes: list[DocumentNode],
+        parent_id: str,
+    ) -> None:
+        siblings = [node for node in nodes if node.parent_id == parent_id]
+        siblings.sort(key=lambda node: (
+            node.start_page is None,
+            node.start_page if node.start_page is not None else 10**9,
+            node.start_character is None,
+            node.start_character if node.start_character is not None else 10**9,
+            node.sequence_no,
+            node.id,
+        ))
+        for sequence_no, node in enumerate(siblings):
+            node.sequence_no = sequence_no
+
+    def _create_standalone_node(
+        self,
+        *,
+        table: dict,
+        table_number: int,
+        start_page: int,
+        end_page: int,
+        nodes: list[DocumentNode],
+    ) -> DocumentNode:
+        parent = self._standalone_parent(nodes, start_page, end_page)
+        table_id = str(table.get("table_id") or f"table-{table_number}")
+        node_id = str(uuid5(
+            NAMESPACE_URL,
+            f"intellidocs:{parent.document_id}:{table_id}:{start_page}:{end_page}",
+        ))
+        existing = next((node for node in nodes if node.id == node_id), None)
+        if existing is not None:
+            return existing
+        node = DocumentNode(
+            id=node_id,
+            document_id=parent.document_id,
+            parent_id=parent.id,
+            node_type="TABLE",
+            identifier=table_id,
+            title=str(table.get("title") or f"Standalone table {table_number}"),
+            sequence_no=0,
+            depth=parent.depth + 1,
+            start_page=start_page,
+            start_character=None,
+            end_page=end_page,
+        )
+        nodes.append(node)
+        self._resequence_children(nodes, parent.id)
+        return node
 
     @staticmethod
     def _document_order(nodes: list[DocumentNode]) -> list[DocumentNode]:
@@ -112,6 +204,14 @@ class TableNodeLinker:
                     and node.id not in used_node_ids
                 )
             ]
+            same_start_candidates = [
+                node
+                for node in table_nodes
+                if (
+                    node.start_page == start_page
+                    and node.id not in used_node_ids
+                )
+            ]
 
             if len(candidates) == 1:
                 matched_node = candidates[0]
@@ -143,6 +243,24 @@ class TableNodeLinker:
                 ]
                 if len(structural_candidates) == 1:
                     matched_node = structural_candidates[0]
+
+            # A valid physical table may live in front matter or another
+            # location omitted from the semantic hierarchy. Create a local,
+            # deterministic TABLE child only when no existing candidate is
+            # ambiguous.
+            if (
+                matched_node is None
+                and not candidates
+                and not same_start_candidates
+                and not structural_candidates
+            ):
+                matched_node = self._create_standalone_node(
+                    table=table,
+                    table_number=table_number,
+                    start_page=start_page,
+                    end_page=end_page,
+                    nodes=nodes,
+                )
 
             # Reject guesses that could select a wrong branch.
             if matched_node is None:

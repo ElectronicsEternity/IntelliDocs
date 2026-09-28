@@ -64,5 +64,57 @@ def test_structural_owner_requires_an_exact_unique_range():
         '', 0, 1, 112, 163, 114,
     )
 
-    with pytest.raises(ValueError, match='0 structural table owners'):
-        TableNodeLinker().link_tables([matrix(112, 113)], [root, schedule])
+    nodes = [root, schedule]
+    linked = TableNodeLinker().link_tables([matrix(112, 113)], nodes)
+
+    synthetic = next(node for node in nodes if node.id == linked[0])
+    assert synthetic.node_type == 'TABLE'
+    assert synthetic.parent_id == 'schedule'
+    assert (synthetic.start_page, synthetic.end_page) == (112, 113)
+
+
+def test_front_matter_table_creates_deterministic_root_child():
+    root = DocumentNode('root', 'doc', None, 'DOCUMENT', '', '', 0, 0, 1, None, 127)
+    section = DocumentNode(
+        'section', 'doc', 'root', 'SECTION', '1.', 'Short title',
+        0, 1, 15, 0, 17,
+    )
+    nodes = [root, section]
+    table = {
+        'table_id': 'publication-history',
+        'title': 'Publication and revision history',
+        'page_numbers': [2],
+    }
+
+    linked = TableNodeLinker().link_tables([table], nodes)
+
+    synthetic = next(node for node in nodes if node.id == linked[0])
+    assert synthetic.node_type == 'TABLE'
+    assert synthetic.identifier == 'publication-history'
+    assert synthetic.title == 'Publication and revision history'
+    assert synthetic.parent_id == 'root'
+    assert synthetic.depth == 1
+    assert synthetic.sequence_no == 0
+    assert section.sequence_no == 1
+    assert TableNodeLinker().link_tables([table], nodes) == linked
+
+
+def test_standalone_table_uses_deepest_containing_parent():
+    root = DocumentNode('root', 'doc', None, 'DOCUMENT', '', '', 0, 0, 1, None, 20)
+    section = DocumentNode(
+        'section', 'doc', 'root', 'SECTION', '1.', 'Rates',
+        0, 1, 5, 0, 10,
+    )
+    nodes = [root, section]
+
+    linked = TableNodeLinker().link_tables([
+        {
+            'table_id': 'rates-table',
+            'title': 'Rates by area',
+            'page_numbers': [7],
+        }
+    ], nodes)
+
+    synthetic = next(node for node in nodes if node.id == linked[0])
+    assert synthetic.parent_id == 'section'
+    assert synthetic.depth == 2
