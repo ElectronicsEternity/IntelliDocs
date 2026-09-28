@@ -37,6 +37,19 @@ def test_profiling_and_embedding_costs():
     assert embedding["output_tokens"] == 0
 
 
+def test_sol_and_terra_costs_use_current_model_rates():
+    sol = build_record(
+        response("gpt-5.6-sol", input_tokens=1000, output_tokens=100),
+        activity="table_identification", model="gpt-5.6-sol", user_id="user-a",
+    )
+    terra = build_record(
+        response("gpt-5.6-terra", input_tokens=1000, output_tokens=100),
+        activity="regular_table_extraction", model="gpt-5.6-terra", user_id="user-a",
+    )
+    assert sol["estimated_cost_usd"] == Decimal("0.006")
+    assert terra["estimated_cost_usd"] == Decimal("0.0032")
+
+
 def test_missing_usage_and_unknown_model_do_not_claim_zero_cost():
     missing = build_record(NS(usage=None), activity="chat", model="gpt-5-mini", user_id="a")
     unknown = build_record(response("unknown", input_tokens=1, output_tokens=2),

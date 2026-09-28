@@ -41,3 +41,6 @@ frontend/.env.local
 .coverage
 
 backups/
+
+# Local runtime logs and generated review artifacts
+output/

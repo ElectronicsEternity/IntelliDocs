@@ -23,6 +23,8 @@ class HierarchyImporter:
 
         # Defensively validate profiles before conversion.
         self.validator = DocumentProfileValidator()
+        self._page_hints: dict[str, int] = {}
+        self._opening_texts: dict[str, str] = {}
 
 
     # Validate, convert, and persist one hierarchy.
@@ -31,13 +33,15 @@ class HierarchyImporter:
         document_id: str,
         hierarchy: dict,
         owner_id: str,
-    ) -> None:
+    ) -> dict[str, dict]:
 
         # Scope every hierarchy write to the authenticated document owner.
         self.repository.owner_id = owner_id
 
         # Build and validate nodes before reaching the
         # database boundary.
+        self._page_hints = {}
+        self._opening_texts = {}
         nodes = self.build_nodes(
             document_id=document_id,
             hierarchy=hierarchy,
@@ -45,6 +49,10 @@ class HierarchyImporter:
 
         # Persist only a completely validated node collection.
         self.repository.bulk_create(nodes)
+        return {
+            "page_hints": dict(self._page_hints),
+            "opening_texts": dict(self._opening_texts),
+        }
 
 
     # Build hierarchy nodes without writing to PostgreSQL.
@@ -93,6 +101,16 @@ class HierarchyImporter:
 
         # Give this database node its own unique identifier.
         node_id = str(uuid4())
+
+        # Retain the AI-supplied mapping evidence only for the immediate
+        # deterministic mapper. The final physical positions are calculated
+        # locally and persisted separately.
+        start_page = node.get("start_page")
+        if type(start_page) is int:
+            self._page_hints[node_id] = start_page
+        opening_text = node.get("opening_text")
+        if isinstance(opening_text, str) and opening_text.strip():
+            self._opening_texts[node_id] = opening_text.strip()
 
         # Convert raw JSON fields into a DocumentNode model.
         document_node = DocumentNode(

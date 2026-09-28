@@ -25,7 +25,11 @@ def _get(value, key, default=None):
 
 
 def _rates(model: str):
-    if model == "gpt-5-mini" or model.startswith("gpt-5-mini-"):
+    if model == "gpt-5.6-sol" or model.startswith("gpt-5.6-sol-"):
+        values = (settings.AI_GPT56_SOL_INPUT_RATE, settings.AI_GPT56_SOL_CACHED_INPUT_RATE, settings.AI_GPT56_SOL_OUTPUT_RATE)
+    elif model == "gpt-5.6-terra" or model.startswith("gpt-5.6-terra-"):
+        values = (settings.AI_GPT56_TERRA_INPUT_RATE, settings.AI_GPT56_TERRA_CACHED_INPUT_RATE, settings.AI_GPT56_TERRA_OUTPUT_RATE)
+    elif model == "gpt-5-mini" or model.startswith("gpt-5-mini-"):
         values = (settings.AI_GPT5_MINI_INPUT_RATE, settings.AI_GPT5_MINI_CACHED_INPUT_RATE, settings.AI_GPT5_MINI_OUTPUT_RATE)
     elif model == "gpt-5" or model.startswith("gpt-5-202"):
         values = (settings.AI_GPT5_INPUT_RATE, settings.AI_GPT5_CACHED_INPUT_RATE, settings.AI_GPT5_OUTPUT_RATE)
@@ -53,6 +57,10 @@ def build_record(response, *, activity, model, user_id, document_id=None, conver
     rates = _rates(reported_model)
     cost = None
     if rates is not None and input_tokens is not None and output_tokens is not None:
+        if input_tokens > settings.AI_LONG_CONTEXT_TOKEN_THRESHOLD and reported_model.startswith("gpt-5.6-"):
+            # GPT-5.6 long-context requests use 2x input/cached input and
+            # 1.5x output rates above the documented threshold.
+            rates = (rates[0] * 2, rates[1] * 2, rates[2] * Decimal("1.5"))
         # Cached input is a subset of input; reasoning is already in output.
         cost = (Decimal(input_tokens - cached) * rates[0] + Decimal(cached) * rates[1] + Decimal(output_tokens) * rates[2]) / Decimal(1_000_000)
     return {
@@ -89,6 +97,10 @@ def tracked_ai_call(call, *, activity, model, user_id=None, document_id=None, at
     response = None
     error = None
     try:
+        if owner and context.get("enforce_budget"):
+            # Import locally to keep the usage logger independent at import time.
+            from app.services.usage.tracker import UsageTracker
+            UsageTracker().ensure_ai_budget_available(owner)
         response = call()
         return response
     except Exception as exc:

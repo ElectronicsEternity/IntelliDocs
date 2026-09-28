@@ -28,11 +28,9 @@ from app.database.database import Database
 from app.indexing.document_indexer import DocumentIndexer
 from app.indexing.document_profiler import DocumentProfiler
 from app.indexing.hierarchy_importer import HierarchyImporter
-from app.indexing.page_mapper import PageMapper
+from app.indexing.forward_dfs_page_mapper import ForwardDFSPageMapper
 from app.ingestion.parser import PDFParser
-from app.ingestion.pdf_table_processor import (
-    PDFTableProcessor,
-)
+from app.ingestion.ai_table_processor import AIVisualTableProcessor
 from app.repositories.document_node_repository import (
     DocumentNodeRepository,
 )
@@ -53,8 +51,8 @@ class DocumentIngestionWorkflow:
         self.node_repository = DocumentNodeRepository(
             self.database
         )
-        self.page_mapper = PageMapper(self.node_repository)
-        self.table_processor = PDFTableProcessor()
+        self.page_mapper = ForwardDFSPageMapper(self.node_repository)
+        self.table_processor = AIVisualTableProcessor()
 
     # Process one PDF from parsing through embeddings.
     def process(
@@ -84,8 +82,16 @@ class DocumentIngestionWorkflow:
 
         try:
             # Combine all pages for hierarchy profiling.
-            document_text = "\n".join(
-                page.text for page in document.pages
+            page_numbers = [page.page_number for page in document.pages]
+            expected_page_numbers = list(range(1, document.total_pages + 1))
+            if page_numbers != expected_page_numbers:
+                raise ValueError(
+                    "Extracted page labels must be unique, ordered and cover "
+                    "every physical PDF page."
+                )
+            document_text = "\n\n".join(
+                f"[[PAGE_LABEL: {page.page_number}]]\n{page.text}"
+                for page in document.pages
             )
 
             # Ask the profiler for the complete hierarchy.
@@ -94,10 +100,11 @@ class DocumentIngestionWorkflow:
                 document_language=document.language,
                 document_id=document.id,
                 owner_id=owner_id,
+                page_count=document.total_pages,
             )
 
             # Convert hierarchy JSON into database nodes.
-            self.importer.import_hierarchy(
+            mapping_metadata = self.importer.import_hierarchy(
                 document_id=document.id,
                 hierarchy=hierarchy,
                 owner_id=owner_id,
@@ -109,7 +116,11 @@ class DocumentIngestionWorkflow:
             )
 
             # Locate node pages and character positions.
-            self.page_mapper.map_document(document)
+            self.page_mapper.map_document(
+                document,
+                page_hints=mapping_metadata["page_hints"],
+                opening_texts=mapping_metadata["opening_texts"],
+            )
             self.indexer.update_page_mapping_version(
                 document.id,
                 CURRENT_PAGE_MAPPING_VERSION,
@@ -123,7 +134,9 @@ class DocumentIngestionWorkflow:
 
             # Extract and normalize every physical table.
             normalized_tables = self.table_processor.process(
-                pdf_path
+                pdf_path,
+                owner_id=owner_id,
+                document_id=document.id,
             )
 
             # Build and persist structured retrieval data.

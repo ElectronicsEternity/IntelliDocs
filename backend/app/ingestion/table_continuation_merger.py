@@ -387,7 +387,8 @@ class TableContinuationMerger:
         self,
         current: ExtractedTable,
         following: ExtractedTable,
-        tables: list[ExtractedTable]
+        tables: list[ExtractedTable],
+        gap_checker=None,
     ) -> tuple[bool, list[str], bool, int]:
 
         # Confirm that page numbers are consecutive.
@@ -514,6 +515,14 @@ class TableContinuationMerger:
             )
         )
 
+        # Preserve the existing merge path. Relax only the failed bottom check;
+        # unknown gap content or missing page context never authorizes merging.
+        if (not should_merge and not ends_near_bottom and consecutive and page_order
+                and starts_near_top and repeated_header and same_columns and aligned
+                and gap_checker is not None and gap_checker.gap_is_clear(current, following)):
+            should_merge = True
+            reasons.append("guarded bottom-threshold fallback: clear continuation gap")
+
         # Return the decision and its measured evidence.
         return (
             should_merge,
@@ -525,7 +534,8 @@ class TableContinuationMerger:
     # Merge confirmed fragments into logical tables.
     def merge_tables(
         self,
-        tables: list[ExtractedTable]
+        tables: list[ExtractedTable],
+        gap_checker=None,
     ) -> list[LogicalTable]:
 
         # Return safely when no tables were extracted.
@@ -556,6 +566,7 @@ class TableContinuationMerger:
                 current,
                 following,
                 ordered,
+                gap_checker=gap_checker,
             )
 
             # Unpack the complete merge evaluation.

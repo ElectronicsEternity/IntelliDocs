@@ -32,7 +32,7 @@ class FakeConversations:
 
 
 class FakeUsage:
-    def ensure_question_allowed(self, user_id):
+    def ensure_ai_budget_available(self, user_id):
         pass
 
     def record(self, *args, **kwargs):
@@ -40,9 +40,9 @@ class FakeUsage:
 
 
 class LimitReachedUsage(FakeUsage):
-    def ensure_question_allowed(self, user_id):
+    def ensure_ai_budget_available(self, user_id):
         from fastapi import HTTPException
-        raise HTTPException(429, "Your Trial plan monthly question limit has been reached.")
+        raise HTTPException(429, "Your Trial plan usage allowance has been reached.")
 
 
 def test_rag_retrieval_uses_authenticated_owner_only():
@@ -60,7 +60,7 @@ def test_rag_retrieval_uses_authenticated_owner_only():
     assert result["sources"][0]["document_id"] == "doc-a"
 
 
-def test_rag_question_limit_is_checked_before_retrieval():
+def test_rag_usage_allowance_is_checked_before_retrieval():
     retriever = FakeRetriever()
     service = RagService(
         retriever=retriever,

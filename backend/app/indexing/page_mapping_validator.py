@@ -65,6 +65,7 @@ class PageMappingValidator:
         self,
         document: Document,
         nodes: list[DocumentNode],
+        opening_texts: dict[str, str] | None = None,
     ) -> PageMappingValidationResult:
         node_lookup = {
             node.id: node for node in nodes
@@ -84,6 +85,7 @@ class PageMappingValidator:
             self._find_anchor_text_mismatches(
                 document,
                 nodes,
+                opening_texts,
             )
         )
         order_violations = (
@@ -243,6 +245,7 @@ class PageMappingValidator:
         self,
         document: Document,
         nodes: list[DocumentNode],
+        opening_texts: dict[str, str] | None = None,
     ) -> list[DocumentNode]:
         pages = {
             page.page_number: page
@@ -267,6 +270,8 @@ class PageMappingValidator:
                 continue
 
             anchor = (
+                (opening_texts or {}).get(node.id)
+                or
                 (node.title or "").strip()
                 or (node.identifier or "").strip()
             )

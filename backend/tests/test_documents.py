@@ -80,6 +80,9 @@ class FakeUsage:
     def ensure_processing_allowed(self, user_id, page_count):
         pass
 
+    def ensure_ai_budget_available(self, user_id):
+        pass
+
 
 class SuccessfulWorkflow:
     def process(self, **kwargs):
@@ -177,6 +180,28 @@ def test_failed_processing_produces_failed_status():
     assert repository.statuses == ["processing", "failed"]
     assert repository.record["processing_error"] == (
         "This PDF is password-protected or encrypted. Upload an unlocked copy and retry."
+    )
+
+
+def test_openai_spend_limit_has_an_actionable_processing_error():
+    error = RuntimeError(
+        "insufficient_quota: organization_spend_limit_exceeded"
+    )
+
+    assert DocumentService._public_processing_error(error) == (
+        "AI processing is temporarily unavailable because the service "
+        "spending limit was reached. Please try again later."
+    )
+
+
+def test_mapping_failure_is_not_reported_as_a_damaged_pdf():
+    error = ValueError(
+        "Invalid scope boundary for node: (5, 3039) to (5, 3039)."
+    )
+
+    assert DocumentService._public_processing_error(error) == (
+        "We could not reliably map this document's structure. "
+        "Please retry processing."
     )
 
 

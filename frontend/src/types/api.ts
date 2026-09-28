@@ -50,5 +50,8 @@ export interface UsageSummary {
   documents: UsageMetric
   storage_bytes: UsageMetric
   pages_processed: UsageMetric
-  questions: UsageMetric
+  ai_usage: {
+    used_percent: number
+    remaining_percent: number
+  }
 }

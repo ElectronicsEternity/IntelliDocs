@@ -17,15 +17,22 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     MAX_UPLOAD_BYTES: int = 15 * 1024 * 1024
     MAX_PAGES_PER_DOCUMENT: int = 500
+    BORDERLESS_TABLE_HEADER_GAP: float = 25.0
+    BORDERLESS_TABLE_MIN_LINES: int = 3
+    TABLE_ROUTINE_MARGIN_RATIO: float = 0.12
+    TABLE_ROUTINE_HEADER_MIN_PAGES: int = 3
     TRIAL_MAX_DOCUMENTS: int = 25
     TRIAL_MAX_STORAGE_BYTES: int = 50 * 1024 * 1024
     TRIAL_MAX_PAGES_PER_MONTH: int = 500
-    TRIAL_MAX_QUESTIONS_PER_MONTH: int = 100
+    TRIAL_DURATION_DAYS: int = 14
+    TRIAL_AI_BUDGET_USD: float = 2.0
     PRO_MAX_DOCUMENTS: int = 250
     PRO_MAX_STORAGE_BYTES: int = 2 * 1024 * 1024 * 1024
     PRO_MAX_PAGES_PER_MONTH: int = 5000
-    PRO_MAX_QUESTIONS_PER_MONTH: int = 2000
+    PRO_AI_BUDGET_USD: float = 20.0
     PROCESSING_STALE_AFTER_SECONDS: int = 60 * 60
+    # Additional targeted correction calls after the initial hierarchy request.
+    HIERARCHY_REPAIR_MAX_ATTEMPTS: int = 2
     # Standard USD rates per million tokens; historical records keep a snapshot.
     AI_GPT5_INPUT_RATE: float = 1.25
     AI_GPT5_CACHED_INPUT_RATE: float = 0.125
@@ -33,6 +40,18 @@ class Settings(BaseSettings):
     AI_GPT5_MINI_INPUT_RATE: float = 0.25
     AI_GPT5_MINI_CACHED_INPUT_RATE: float = 0.025
     AI_GPT5_MINI_OUTPUT_RATE: float = 2.0
+    AI_GPT56_SOL_INPUT_RATE: float = 4.0
+    AI_GPT56_SOL_CACHED_INPUT_RATE: float = 0.4
+    AI_GPT56_SOL_OUTPUT_RATE: float = 20.0
+    AI_GPT56_TERRA_INPUT_RATE: float = 2.0
+    AI_GPT56_TERRA_CACHED_INPUT_RATE: float = 0.2
+    AI_GPT56_TERRA_OUTPUT_RATE: float = 12.0
+    AI_LONG_CONTEXT_TOKEN_THRESHOLD: int = 272_000
+    TABLE_PROFILE_MODEL: str = "gpt-5.6-sol"
+    REGULAR_TABLE_MODEL: str = "gpt-5.6-terra"
+    SEMANTIC_TABLE_MODEL: str = "gpt-5.6-sol"
+    TABLE_REASONING_EFFORT: str = "high"
+    TABLE_MAX_OUTPUT_TOKENS: int = 65536
     AI_EMBEDDING_INPUT_RATE: float = 0.02
     RAG_TOP_K: int = 10
     FRONTEND_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"

@@ -8,6 +8,11 @@ class UsageMetric(BaseModel):
     limit: int
 
 
+class AiUsagePercentage(BaseModel):
+    used_percent: float
+    remaining_percent: float
+
+
 class UsageSummaryResponse(BaseModel):
     plan_code: str
     plan_name: str
@@ -16,4 +21,4 @@ class UsageSummaryResponse(BaseModel):
     documents: UsageMetric
     storage_bytes: UsageMetric
     pages_processed: UsageMetric
-    questions: UsageMetric
+    ai_usage: AiUsagePercentage

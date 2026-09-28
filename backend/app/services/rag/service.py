@@ -80,9 +80,13 @@ class RagService:
         self.usage = usage or UsageTracker()
 
     def chat(self, *, question: str, user_id: str, conversation_id: str | None, top_k: int | None) -> dict:
-        self.usage.ensure_question_allowed(user_id)
+        self.usage.ensure_ai_budget_available(user_id)
         conversation_id = self.conversations.ensure(user_id, conversation_id)
-        with ai_usage_context(user_id=user_id, conversation_id=conversation_id):
+        with ai_usage_context(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            enforce_budget=True,
+        ):
             chunks = self._unique_chunks(
                 self.retriever.retrieve(
                     question=question,

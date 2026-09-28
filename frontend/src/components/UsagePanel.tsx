@@ -63,10 +63,9 @@ export function UsagePanel({ api }: Props) {
         <UsageCard label="Documents" metric={usage.documents} />
         <UsageCard format={formatBytes} label="Storage" metric={usage.storage_bytes} />
         <UsageCard label="Pages processed" metric={usage.pages_processed} monthly />
-        <UsageCard label="Questions asked" metric={usage.questions} monthly />
       </div>
       <div className="plan-note">
-        <div><strong>{usage.plan_name} plan</strong><p>Monthly page and question allowances reset on {resetDate}.</p></div>
+        <div><strong>{usage.plan_name} plan</strong><p>Your current usage period ends on {resetDate}. Questions use the same overall allowance rather than a separate question limit.</p></div>
         {usage.plan_code === 'trial' && <span>Pro upgrades and payments are coming in a later change set.</span>}
       </div>
     </section>

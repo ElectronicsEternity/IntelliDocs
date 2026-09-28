@@ -24,6 +24,7 @@ from openai import OpenAI
 
 from app.config import settings
 from app.constants import DOCUMENT_PROFILER_MODEL
+from app.indexing.hierarchy_prompt_rules import OPENING_TEXT_RULES
 from app.services.usage.ai_usage import tracked_ai_call
 from app.indexing.document_profile_validator import (
     DocumentProfileValidationError,
@@ -65,12 +66,14 @@ class DocumentProfiler:
         document_language: str,
         document_id: str,
         owner_id: str,
+        page_count: int | None = None,
     ) -> dict:
 
         # Build the full initial instruction once.
         base_prompt = self._build_prompt(
             document_text=document_text,
-            document_language=document_language
+            document_language=document_language,
+            page_count=page_count,
         )
         # No rejected output exists before the first request.
         previous_output = None
@@ -111,6 +114,8 @@ class DocumentProfiler:
                 result = self.validator.validate(
                     hierarchy=hierarchy,
                     expected_language=document_language,
+                    expected_page_count=page_count,
+                    require_mapping_metadata=page_count is not None,
                 )
                 # Keep exact errors for saving and retrying.
                 errors = result.errors
@@ -332,7 +337,8 @@ Return a complete corrected hierarchy as JSON only.
     def _build_prompt(
         self,
         document_text: str,
-        document_language: str
+        document_language: str,
+        page_count: int | None = None,
     ) -> str:
 
         return f"""
@@ -488,6 +494,11 @@ GENERAL RULES
 4. Preserve the hierarchy exactly as it appears.
 
 5. Preserve all numbering, lettering, and identifiers exactly as written.
+Never introduce numbering or identifiers not printed in the source, including
+"1." or "(1)". Do not infer an unprinted subsection from later clauses.
+Example: if the source reads "67. In the course..." followed by clauses
+"(a)", "(b)" and "(c)", do not create a subsection "(1)". Keep those clauses
+directly under Section 67 unless an intervening identifier is actually printed.
 
 6. Detect tables and include them as TABLE nodes.
 
@@ -503,7 +514,7 @@ GENERAL RULES
 
 12. Do not summarize content.
 
-13. Do not extract body text.
+13. Do not extract body text except the short opening_text excerpt required below.
 
 14. Do not infer missing structure.
 
@@ -529,17 +540,40 @@ Every node MUST contain:
 - type
 - identifier
 - title
+- opening_text
+- start_page
 - children
 
 Rules:
 
 - If title does not exist, use an empty string.
 - If identifier does not exist, use an empty string.
+- start_page must be the integer PAGE_LABEL where this node physically begins.
+- Use only supplied PAGE_LABEL values. Never use a printed page number.
+- Search only the claimed PAGE_LABEL when selecting opening_text; do not move
+  backward or forward to another page.
 - children must always be present.
 - If a node has no children, return an empty array.
 
+PAGE LABEL AND COVERAGE RULES
+
+The document contains exactly {page_count if page_count is not None else "the supplied number of"} physical pages.
+Each page begins with a marker in the form [[PAGE_LABEL: N]].
+
+1. PAGE_LABEL values are the only valid source for start_page.
+2. Return a root-level page_coverage array containing one record for every
+PAGE_LABEL in ascending order without gaps or duplicates.
+3. Each record must contain page_label and classification.
+4. classification must be exactly "new_nodes_start_here" when one or more
+returned hierarchy nodes begin on that page, otherwise
+"no_new_nodes_start_here".
+5. Inspect through the final supplied PAGE_LABEL. Do not omit intermediate or
+final pages.
+
 
 DOCUMENT LANGUAGE
+
+{OPENING_TEXT_RULES}
 
 The document language has already been detected
 by the application.
@@ -577,6 +611,11 @@ Root node must always be:
   "language": "{document_language}",
   "identifier": "",
   "title": "",
+  "opening_text": null,
+  "start_page": 1,
+  "page_coverage": [
+    {{"page_label": 1, "classification": "new_nodes_start_here"}}
+  ],
   "children": []
 }}
 

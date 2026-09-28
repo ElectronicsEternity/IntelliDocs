@@ -25,6 +25,7 @@ from app.indexing.table_node_linker import TableNodeLinker
 
 from app.rag.chunk_analyzer import ChunkAnalyzer
 from app.rag.chunker import Chunker
+from app.rag.chunk_deduplicator import deduplicate_chunks
 from app.rag.embedder import Embedder
 from app.rag.tokenizer import Tokenizer
 
@@ -185,6 +186,13 @@ class DocumentIndexer:
                     recommended_chunk_size
                 ),
             )
+
+            # Remove exact duplicate content/source pairs before storage and
+            # paid embeddings, after text and table chunks have been combined.
+            generated_count = len(chunks)
+            chunks = deduplicate_chunks(chunks)
+            print(f"Chunk deduplication: {generated_count} generated, "
+                  f"{len(chunks)} retained, {generated_count - len(chunks)} removed.")
 
             self.update_document_status(
                 document.id,

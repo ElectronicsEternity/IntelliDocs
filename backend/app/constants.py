@@ -60,8 +60,8 @@ DOCUMENT_STATUS_FAILED = "FAILED"
 # ============================================
 
 # Increase only the version for changed logic.
-CURRENT_PAGE_MAPPING_VERSION = 1
-CURRENT_CHUNKING_VERSION = 2
+CURRENT_PAGE_MAPPING_VERSION = 2
+CURRENT_CHUNKING_VERSION = 3
 CURRENT_EMBEDDING_VERSION = 2
 
 

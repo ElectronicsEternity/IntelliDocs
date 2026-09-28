@@ -63,24 +63,32 @@ export class IntelliDocsApi {
     return this.request('/usage')
   }
 
+  private notifyUsageChanged() {
+    window.dispatchEvent(new Event('intellidocs:usage-updated'))
+  }
+
   uploadDocument(file: File): Promise<DocumentRecord> {
     const form = new FormData()
     form.append('file', file)
     return this.request('/documents/upload', { method: 'POST', body: form })
   }
 
-  processDocument(documentId: string): Promise<DocumentRecord> {
-    return this.request(`/documents/${documentId}/process`, { method: 'POST' })
+  async processDocument(documentId: string): Promise<DocumentRecord> {
+    const result = await this.request<DocumentRecord>(`/documents/${documentId}/process`, { method: 'POST' })
+    this.notifyUsageChanged()
+    return result
   }
 
   deleteDocument(documentId: string): Promise<void> {
     return this.request(`/documents/${documentId}`, { method: 'DELETE' })
   }
 
-  chat(question: string, conversationId?: string): Promise<ChatResponse> {
-    return this.request('/chat', {
+  async chat(question: string, conversationId?: string): Promise<ChatResponse> {
+    const result = await this.request<ChatResponse>('/chat', {
       method: 'POST',
       body: JSON.stringify({ question, conversation_id: conversationId || null }),
     })
+    this.notifyUsageChanged()
+    return result
   }
 }

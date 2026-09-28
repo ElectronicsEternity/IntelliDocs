@@ -20,7 +20,7 @@ class FakeUsageTracker:
             "documents": {"used": 2, "limit": 25},
             "storage_bytes": {"used": 1024, "limit": 52428800},
             "pages_processed": {"used": 10, "limit": 500},
-            "questions": {"used": 4, "limit": 100},
+            "ai_usage": {"used_percent": 12.5, "remaining_percent": 87.5},
         }
 
 
@@ -47,17 +47,6 @@ class InMemoryUsageTracker(UsageTracker):
 
     def monthly_quantity(self, user_id: str, event_type: str) -> int:
         return self.monthly.get(event_type, 0)
-
-
-def test_trial_question_limit_is_enforced(monkeypatch):
-    monkeypatch.setattr("app.config.settings.TRIAL_MAX_QUESTIONS_PER_MONTH", 2)
-    tracker = InMemoryUsageTracker({"rag_question": 2})
-
-    with pytest.raises(HTTPException) as error:
-        tracker.ensure_question_allowed("user-a")
-
-    assert error.value.status_code == 429
-    assert "Trial plan" in str(error.value.detail)
 
 
 def test_trial_page_limit_checks_the_incoming_document(monkeypatch):

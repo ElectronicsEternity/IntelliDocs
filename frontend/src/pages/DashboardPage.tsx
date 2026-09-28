@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { ChatPanel } from '../components/ChatPanel'
 import { DocumentPanel } from '../components/DocumentPanel'
 import { UsagePanel } from '../components/UsagePanel'
+import { UsageBudgetBar } from '../components/UsageBudgetBar'
 import { IntelliDocsApi } from '../lib/api'
 import { supabase } from '../lib/supabase'
 
@@ -49,6 +50,7 @@ export function DashboardPage() {
           <button className="text-button" disabled={signingOut} onClick={() => void handleSignOut()}>{signingOut ? 'Signing out…' : 'Sign out'}</button>
         </div>
       </header>
+      <UsageBudgetBar api={api} />
       <main className="workspace">
         {view === 'documents' && <DocumentPanel api={api} />}
         {view === 'chat' && <ChatPanel api={api} />}

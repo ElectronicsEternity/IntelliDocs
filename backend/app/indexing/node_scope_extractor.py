@@ -1,5 +1,10 @@
+import logging
+
 from app.models.document import Document
 from app.models.document_node import DocumentNode
+
+
+logger = logging.getLogger(__name__)
 
 
 class NodeScopeExtractor:
@@ -73,16 +78,17 @@ class NodeScopeExtractor:
             )
         ]
 
-        # Reject gaps that could merge unrelated scopes.
+        # Keep processing the anchors that have reliable positions. Nodes
+        # representing deleted or combined provisions may legitimately have
+        # no standalone physical opening in the PDF.
         if len(mapped_anchored_nodes) != len(anchored_nodes):
             missing_count = (
                 len(anchored_nodes)
                 - len(mapped_anchored_nodes)
             )
-            raise ValueError(
-                f"Cannot extract node scopes: {missing_count} "
-                "anchored node(s) have no complete "
-                "start position."
+            logger.warning(
+                "Skipping %s anchored node(s) without a complete start position.",
+                missing_count,
             )
 
         # Physical order uses page and character position.

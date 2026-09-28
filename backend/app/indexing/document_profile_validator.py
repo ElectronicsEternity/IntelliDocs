@@ -105,6 +105,8 @@ class DocumentProfileValidator:
         self,
         hierarchy: object,
         expected_language: str | None = None,
+        expected_page_count: int | None = None,
+        require_mapping_metadata: bool = False,
     ) -> DocumentProfileValidationResult:
 
         # Collect every issue instead of stopping at the first.
@@ -173,10 +175,127 @@ class DocumentProfileValidator:
                     "detected document language."
                 )
 
+        if require_mapping_metadata:
+            self._check_mapping_metadata(
+                hierarchy=hierarchy,
+                expected_page_count=expected_page_count,
+                errors=errors,
+            )
+
         # Return all errors and useful inspection statistics.
         return DocumentProfileValidationResult(
             errors=tuple(errors),
         )
+
+    def _check_mapping_metadata(
+        self,
+        hierarchy: dict,
+        expected_page_count: int | None,
+        errors: list[str],
+    ) -> None:
+        """Validate exact physical-page hints and complete page coverage."""
+        node_start_pages: list[int] = []
+
+        def inspect(node: object, path: str, parent_page: int | None) -> None:
+            if not isinstance(node, dict):
+                return
+
+            if "start_page" not in node:
+                errors.append(f"{path} is missing field: start_page.")
+                start_page = None
+            else:
+                start_page = node.get("start_page")
+                if type(start_page) is not int:
+                    errors.append(f"{path}.start_page must be an integer PAGE_LABEL.")
+                    start_page = None
+                elif expected_page_count is not None and not 1 <= start_page <= expected_page_count:
+                    errors.append(
+                        f"{path}.start_page {start_page} is outside PAGE_LABEL 1..{expected_page_count}."
+                    )
+
+            if start_page is not None:
+                node_start_pages.append(start_page)
+                if parent_page is not None and start_page < parent_page:
+                    errors.append(
+                        f"{path}.start_page {start_page} precedes its parent page {parent_page}."
+                    )
+
+            if "opening_text" not in node:
+                errors.append(f"{path} is missing field: opening_text.")
+            else:
+                opening_text = node.get("opening_text")
+                if opening_text is not None and not isinstance(opening_text, str):
+                    errors.append(f"{path}.opening_text must be text or null.")
+                if node.get("type") in {"DOCUMENT", "TABLE"} and opening_text is not None:
+                    errors.append(f"{path}.opening_text must be null for {node.get('type')} nodes.")
+
+            children = node.get("children")
+            if not isinstance(children, list):
+                return
+
+            previous_page: int | None = None
+            for index, child in enumerate(children):
+                child_path = f"{path}.children[{index}]"
+                child_page = child.get("start_page") if isinstance(child, dict) else None
+                if type(child_page) is int:
+                    if previous_page is not None and child_page < previous_page:
+                        errors.append(
+                            f"{child_path}.start_page {child_page} precedes previous sibling page {previous_page}."
+                        )
+                    previous_page = child_page
+                inspect(child, child_path, start_page if start_page is not None else parent_page)
+
+        inspect(hierarchy, "DOCUMENT", None)
+
+        if hierarchy.get("start_page") != 1:
+            errors.append("The DOCUMENT start_page must be PAGE_LABEL 1.")
+
+        coverage = hierarchy.get("page_coverage")
+        if not isinstance(coverage, list):
+            errors.append("DOCUMENT.page_coverage must be an array.")
+            return
+        if expected_page_count is None:
+            return
+
+        labels: list[int] = []
+        classifications: dict[int, str] = {}
+        allowed = {"new_nodes_start_here", "no_new_nodes_start_here"}
+        for index, record in enumerate(coverage):
+            if not isinstance(record, dict):
+                errors.append(f"DOCUMENT.page_coverage[{index}] must be an object.")
+                continue
+            label = record.get("page_label")
+            classification = record.get("classification")
+            if type(label) is not int:
+                errors.append(f"DOCUMENT.page_coverage[{index}].page_label must be an integer.")
+                continue
+            labels.append(label)
+            if classification not in allowed:
+                errors.append(
+                    f"DOCUMENT.page_coverage[{index}].classification is invalid."
+                )
+                continue
+            classifications[label] = classification
+
+        expected_labels = list(range(1, expected_page_count + 1))
+        if labels != expected_labels:
+            errors.append(
+                "DOCUMENT.page_coverage must contain PAGE_LABEL 1 through "
+                f"{expected_page_count} exactly once in ascending order."
+            )
+
+        pages_with_nodes = set(node_start_pages)
+        for label in expected_labels:
+            classification = classifications.get(label)
+            expected_classification = (
+                "new_nodes_start_here"
+                if label in pages_with_nodes
+                else "no_new_nodes_start_here"
+            )
+            if classification is not None and classification != expected_classification:
+                errors.append(
+                    f"PAGE_LABEL {label} classification must be {expected_classification}."
+                )
 
     # Inspect one node and all descendants recursively.
     def _inspect_node(
@@ -347,6 +466,14 @@ class DocumentProfileValidator:
                 identifier.strip(),
                 title.strip(),
             )
+
+            # Repeated printed labels can identify distinct provisions. Only
+            # reject matching labels/titles when their opening excerpts agree.
+            # Missing/blank openings are inconclusive and do not block ingestion.
+            opening = child.get("opening_text")
+            if not isinstance(opening, str) or not opening.strip():
+                continue
+            signature += (" ".join(opening.split()),)
 
             # The same meaningful sibling must not repeat.
             if signature in signatures:

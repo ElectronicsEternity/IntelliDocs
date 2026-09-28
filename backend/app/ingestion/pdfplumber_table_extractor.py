@@ -18,6 +18,7 @@
 
 # Import Any for pdfplumber page objects.
 from typing import Any
+from app.ingestion.borderless_table_detector import find_borderless_tables
 
 # Import the application-owned table model.
 from app.models.extracted_table import (
@@ -197,7 +198,8 @@ class PdfPlumberTableExtractor:
     def extract_page_tables(
         self,
         page: Any,
-        page_number: int
+        page_number: int,
+        borderless_regions: list[BoundingBox] | None = None,
     ) -> list[ExtractedTable]:
 
         # Ignore cover-page layouts under the default rule.
@@ -206,6 +208,14 @@ class PdfPlumberTableExtractor:
 
         # Ask pdfplumber to detect table candidates.
         detected_tables = page.find_tables()
+        for region in borderless_regions or []:
+            for candidate in find_borderless_tables(page, region):
+                # Keep ruled detection authoritative in overlapping regions.
+                if not any(candidate.bbox[0] < t.bbox[2] and candidate.bbox[2] > t.bbox[0]
+                           and candidate.bbox[1] < t.bbox[3] and candidate.bbox[3] > t.bbox[1]
+                           for t in detected_tables):
+                    detected_tables.append(candidate)
+        detected_tables.sort(key=lambda t: (t.bbox[1], t.bbox[0]))
 
         # Collect cleaned application table models.
         extracted_tables = []

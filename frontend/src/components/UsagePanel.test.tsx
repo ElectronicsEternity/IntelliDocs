@@ -15,7 +15,7 @@ describe('UsagePanel', () => {
         documents: { used: 2, limit: 25 },
         storage_bytes: { used: 1048576, limit: 52428800 },
         pages_processed: { used: 20, limit: 500 },
-        questions: { used: 4, limit: 100 },
+        ai_usage: { used_percent: 12.5, remaining_percent: 87.5 },
       }),
     } as unknown as IntelliDocsApi
 
@@ -24,7 +24,7 @@ describe('UsagePanel', () => {
     expect((await screen.findAllByText('Trial plan')).length).toBe(2)
     expect(screen.getByText('Documents')).toBeInTheDocument()
     expect(screen.getByText('Pages processed')).toBeInTheDocument()
-    expect(screen.getByText('Questions asked')).toBeInTheDocument()
+    expect(screen.getByText(/Questions use the same overall allowance/)).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
   })
 })

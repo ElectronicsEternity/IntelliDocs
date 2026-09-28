@@ -12,6 +12,7 @@ from app.ingestion.document_ingestion_workflow import DocumentIngestionWorkflow
 from app.services.documents.repository import DocumentRepository
 from app.services.storage.supabase_storage import SupabaseDocumentStorage
 from app.services.usage.tracker import UsageTracker
+from app.services.usage.ai_usage import ai_usage_context
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,17 @@ class DocumentService:
             return "This PDF is password-protected or encrypted. Upload an unlocked copy and retry."
         if "page limit" in message:
             return "This PDF exceeds the page-processing limit for your plan."
-        if "invalid" in message or "damaged" in message or "corrupt" in message:
+        if "organization_spend_limit_exceeded" in message or "insufficient_quota" in message or "spend limit" in message:
+            return (
+                "AI processing is temporarily unavailable because the service "
+                "spending limit was reached. Please try again later."
+            )
+        if "scope boundary" in message or "node scopes" in message:
+            return (
+                "We could not reliably map this document's structure. "
+                "Please retry processing."
+            )
+        if "invalid pdf" in message or "invalid xref" in message or "damaged" in message or "corrupt" in message:
             return "This PDF appears to be damaged or unreadable. Try exporting it again and retry."
         return "We could not process this PDF. You can retry, or upload a newly exported copy."
 
@@ -122,14 +133,20 @@ class DocumentService:
                     "This PDF exceeds the maximum pages allowed per document.",
                 )
             self.usage.ensure_processing_allowed(user_id, page_count)
+            self.usage.ensure_ai_budget_available(user_id)
             workflow = self.workflow_factory()
-            processed_page_count = workflow.process(
-                pdf_path=temporary_path,
-                owner_id=user_id,
+            with ai_usage_context(
+                user_id=user_id,
                 document_id=document_id,
-                register_document=False,
-                original_filename=record["original_filename"],
-            )
+                enforce_budget=True,
+            ):
+                processed_page_count = workflow.process(
+                    pdf_path=temporary_path,
+                    owner_id=user_id,
+                    document_id=document_id,
+                    register_document=False,
+                    original_filename=record["original_filename"],
+                )
             if not isinstance(processed_page_count, bool) and processed_page_count is not None:
                 page_count = processed_page_count
             self.repository.set_status(document_id, user_id, "ready", page_count=page_count)

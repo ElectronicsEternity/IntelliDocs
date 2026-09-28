@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from decimal import Decimal
 
 from app.config import settings
 
@@ -10,7 +11,7 @@ class PlanLimits:
     documents: int
     storage_bytes: int
     pages_per_month: int
-    questions_per_month: int
+    ai_budget_usd: Decimal
 
 
 def get_plan_limits(code: str) -> PlanLimits:
@@ -21,7 +22,7 @@ def get_plan_limits(code: str) -> PlanLimits:
             documents=settings.PRO_MAX_DOCUMENTS,
             storage_bytes=settings.PRO_MAX_STORAGE_BYTES,
             pages_per_month=settings.PRO_MAX_PAGES_PER_MONTH,
-            questions_per_month=settings.PRO_MAX_QUESTIONS_PER_MONTH,
+            ai_budget_usd=Decimal(str(settings.PRO_AI_BUDGET_USD)),
         )
     return PlanLimits(
         code="trial",
@@ -29,5 +30,5 @@ def get_plan_limits(code: str) -> PlanLimits:
         documents=settings.TRIAL_MAX_DOCUMENTS,
         storage_bytes=settings.TRIAL_MAX_STORAGE_BYTES,
         pages_per_month=settings.TRIAL_MAX_PAGES_PER_MONTH,
-        questions_per_month=settings.TRIAL_MAX_QUESTIONS_PER_MONTH,
+        ai_budget_usd=Decimal(str(settings.TRIAL_AI_BUDGET_USD)),
     )
