@@ -16,6 +16,7 @@
 #
 # ========================================
 
+import hashlib
 import json
 
 from pathlib import Path
@@ -78,6 +79,27 @@ class DocumentProfiler:
             document_language=document_language,
             page_count=page_count,
         )
+
+        # Tie reusable hierarchy output to the exact source, prompt and model settings.
+        cache_manifest = self._build_cache_manifest(
+            document_text=document_text,
+            document_language=document_language,
+            page_count=page_count,
+            prompt=base_prompt,
+        )
+
+        # Resume a failed downstream ingestion without repeating a paid hierarchy call.
+        cached_hierarchy = self._load_cached_profile(
+            owner_id=owner_id,
+            document_id=document_id,
+            expected_manifest=cache_manifest,
+            document_text=document_text,
+            document_language=document_language,
+            page_count=page_count,
+        )
+        if cached_hierarchy is not None:
+            print("Stage hierarchy: reused validated accepted_profile.json.")
+            return cached_hierarchy
         # No rejected output exists before the first request.
         previous_output = None
 
@@ -164,6 +186,7 @@ class DocumentProfiler:
                     owner_id=owner_id,
                     document_id=document_id,
                     hierarchy=hierarchy,
+                    cache_manifest=cache_manifest,
                 )
                 # Make acceptance visible in the terminal.
                 print(
@@ -331,6 +354,7 @@ Return a complete corrected hierarchy as JSON only.
         owner_id: str,
         document_id: str,
         hierarchy: dict,
+        cache_manifest: dict,
     ) -> None:
 
         # Reuse the same user and document folder.
@@ -342,6 +366,10 @@ Return a complete corrected hierarchy as JSON only.
         accepted_path = (
             profile_folder / "accepted_profile.json"
         )
+        # Keep cache provenance beside the accepted hierarchy.
+        manifest_path = (
+            profile_folder / "hierarchy_cache_manifest.json"
+        )
         # Store formatted JSON instead of raw response text.
         accepted_path.write_text(
             json.dumps(
@@ -351,6 +379,89 @@ Return a complete corrected hierarchy as JSON only.
             ),
             encoding="utf-8",
         )
+        # Write the manifest only after the accepted profile is safely persisted.
+        manifest_path.write_text(
+            json.dumps(
+                cache_manifest,
+                indent=2,
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    # Build a deterministic identity for one paid hierarchy request configuration.
+    def _build_cache_manifest(
+        self,
+        *,
+        document_text: str,
+        document_language: str,
+        page_count: int | None,
+        prompt: str,
+    ) -> dict:
+        return {
+            "cache_version": 1,
+            "document_text_sha256": hashlib.sha256(
+                document_text.encode("utf-8")
+            ).hexdigest(),
+            "document_language": document_language,
+            "page_count": page_count,
+            "model": settings.HIERARCHY_PROFILE_MODEL,
+            "reasoning_effort": settings.HIERARCHY_REASONING_EFFORT,
+            "max_output_tokens": settings.HIERARCHY_MAX_OUTPUT_TOKENS,
+            "prompt_sha256": hashlib.sha256(
+                prompt.encode("utf-8")
+            ).hexdigest(),
+        }
+
+    # Reuse only a cache whose source/settings match and whose JSON still validates.
+    def _load_cached_profile(
+        self,
+        *,
+        owner_id: str,
+        document_id: str,
+        expected_manifest: dict,
+        document_text: str,
+        document_language: str,
+        page_count: int | None,
+    ) -> dict | None:
+        profile_folder = (
+            DEFAULT_PROFILES_FOLDER
+            / self._safe_folder_name(owner_id)
+            / self._safe_folder_name(document_id)
+        )
+        accepted_path = profile_folder / "accepted_profile.json"
+        manifest_path = profile_folder / "hierarchy_cache_manifest.json"
+
+        # Missing files mean no reusable hierarchy exists for this document.
+        if not accepted_path.is_file() or not manifest_path.is_file():
+            return None
+
+        try:
+            # Both files must parse before any cached data is trusted.
+            cached_manifest = json.loads(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            hierarchy = json.loads(
+                accepted_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            return None
+
+        # A changed PDF, prompt, model or output limit invalidates the cache.
+        if cached_manifest != expected_manifest:
+            return None
+
+        # Re-run every current validator in case validation rules changed later.
+        validated_hierarchy, errors = self._parse_and_validate(
+            raw_output=json.dumps(hierarchy, ensure_ascii=False),
+            document_text=document_text,
+            document_language=document_language,
+            page_count=page_count,
+        )
+        if errors or not isinstance(validated_hierarchy, dict):
+            return None
+        return validated_hierarchy
 
     # Create one isolated profile folder per user and document.
     def _get_profile_folder(

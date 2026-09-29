@@ -111,6 +111,7 @@ def test_profiler_logs_each_validation_attempt(monkeypatch):
     validations = iter([NS(errors=("retry",)), NS(errors=())])
     profiler.validator = NS(validate=lambda **_kwargs: next(validations))
     profiler._build_prompt = lambda **_kwargs: "prompt"
+    profiler._load_cached_profile = lambda **_kwargs: None
     profiler._build_retry_prompt = lambda **_kwargs: "retry prompt"
     profiler._save_attempt = lambda **_kwargs: None
     profiler._save_accepted_profile = lambda **_kwargs: None
