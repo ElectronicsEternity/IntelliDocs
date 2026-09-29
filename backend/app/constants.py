@@ -73,5 +73,10 @@ TOP_K = 10
 # for a chunk to be considered relevant
 SIMILARITY_THRESHOLD = 0.4
 
-CHAT_MODEL = "gpt-5-mini"
+# Use the stronger mini model for legal answer synthesis.
+CHAT_MODEL = "gpt-5.4-mini"
+
+# Medium reasoning improves scope and applicability interpretation while
+# avoiding the higher latency and cost of high reasoning by default.
+CHAT_REASONING_EFFORT = "medium"
 DOCUMENT_PROFILER_MODEL = "gpt-5"

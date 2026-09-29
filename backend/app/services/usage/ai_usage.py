@@ -29,6 +29,8 @@ def _rates(model: str):
         values = (settings.AI_GPT56_SOL_INPUT_RATE, settings.AI_GPT56_SOL_CACHED_INPUT_RATE, settings.AI_GPT56_SOL_OUTPUT_RATE)
     elif model == "gpt-5.6-terra" or model.startswith("gpt-5.6-terra-"):
         values = (settings.AI_GPT56_TERRA_INPUT_RATE, settings.AI_GPT56_TERRA_CACHED_INPUT_RATE, settings.AI_GPT56_TERRA_OUTPUT_RATE)
+    elif model == "gpt-5.4-mini" or model.startswith("gpt-5.4-mini-"):
+        values = (settings.AI_GPT54_MINI_INPUT_RATE, settings.AI_GPT54_MINI_CACHED_INPUT_RATE, settings.AI_GPT54_MINI_OUTPUT_RATE)
     elif model == "gpt-5-mini" or model.startswith("gpt-5-mini-"):
         values = (settings.AI_GPT5_MINI_INPUT_RATE, settings.AI_GPT5_MINI_CACHED_INPUT_RATE, settings.AI_GPT5_MINI_OUTPUT_RATE)
     elif model == "gpt-5" or model.startswith("gpt-5-202"):

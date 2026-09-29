@@ -22,6 +22,14 @@ def test_chat_cost_and_cached_reasoning_are_not_double_counted():
     assert row["reasoning_tokens"] == 500
 
 
+def test_gpt54_mini_cost_uses_current_model_rates():
+    row = build_record(
+        response("gpt-5.4-mini", input_tokens=8000, output_tokens=2000),
+        activity="chat", model="gpt-5.4-mini", user_id="user-a",
+    )
+    assert row["estimated_cost_usd"] == Decimal("0.015")
+
+
 def test_profiling_and_embedding_costs():
     profile = build_record(
         response("gpt-5", input_tokens=60000, output_tokens=10000),
@@ -164,13 +172,13 @@ def test_chat_generator_logs_tokens_before_answer_is_returned(monkeypatch):
     rows = []
     monkeypatch.setattr("app.services.usage.ai_usage._insert", rows.append)
     generator = Generator.__new__(Generator)
-    result = response(prompt_tokens=8000, completion_tokens=2000)
+    result = response("gpt-5.4-mini", prompt_tokens=8000, completion_tokens=2000)
     result.choices = [NS(message=NS(content="Answer"))]
     generator.client = NS(chat=NS(completions=NS(create=lambda **_kwargs: result)))
     with ai_usage_context(user_id="user-a", conversation_id="conversation-a"):
         assert generator.generate("Question", [{"text": "Evidence", "document_title": "Order"}]) == "Answer"
     assert rows[0]["activity"] == "chat"
-    assert rows[0]["estimated_cost_usd"] == Decimal("0.006")
+    assert rows[0]["estimated_cost_usd"] == Decimal("0.015")
     assert generator.last_usage["prompt_tokens"] == 8000
 
 

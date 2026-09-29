@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     AI_GPT5_MINI_INPUT_RATE: float = 0.25
     AI_GPT5_MINI_CACHED_INPUT_RATE: float = 0.025
     AI_GPT5_MINI_OUTPUT_RATE: float = 2.0
+    # GPT-5.4 Mini standard rates per million tokens.
+    AI_GPT54_MINI_INPUT_RATE: float = 0.75
+    AI_GPT54_MINI_CACHED_INPUT_RATE: float = 0.075
+    AI_GPT54_MINI_OUTPUT_RATE: float = 4.5
     AI_GPT56_SOL_INPUT_RATE: float = 4.0
     AI_GPT56_SOL_CACHED_INPUT_RATE: float = 0.4
     AI_GPT56_SOL_OUTPUT_RATE: float = 20.0

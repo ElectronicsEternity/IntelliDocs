@@ -150,9 +150,13 @@ def test_answer_prompt_requires_structured_markdown():
     )
 
     prompt = captured["messages"][0]["content"]
+    assert captured["model"] == "gpt-5.4-mini"
+    assert captured["reasoning_effort"] == "medium"
     assert "Format the answer as clean Markdown" in prompt
     assert "Put every bullet or numbered item on its own line" in prompt
     assert "Use nested bullets for subcategories" in prompt
+    assert "An applicability clause is a clause that expressly states" in prompt
+    assert "use it as the controlling scope" in prompt
 
 
 def test_chat_deduplicates_chunks_and_displays_at_most_five_sources():

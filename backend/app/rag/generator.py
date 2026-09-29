@@ -5,7 +5,7 @@
 from openai import OpenAI
 
 from app.config import settings
-from app.constants import CHAT_MODEL
+from app.constants import CHAT_MODEL, CHAT_REASONING_EFFORT
 from app.services.usage.ai_usage import tracked_ai_call
 
 
@@ -116,22 +116,28 @@ When citing a SUBSECTION or CLAUSE, use its Hierarchy to
 name the nearest descriptive parent. Do not present a child
 reference as though it stands alone.
 
-4. When a TABLE has no Identifier, refer to its Node title
+4. An applicability clause is a clause that expressly states
+whether the requested provision applies or does not apply.
+When such a clause exists, use it as the controlling scope
+instead of clauses that describe particular requirements or
+regulated categories.
+
+5. When a TABLE has no Identifier, refer to its Node title
 when available.
 
-5. Preserve conditions attached to values, including dates,
+6. Preserve conditions attached to values, including dates,
 areas, categories, and working-day counts.
 
-6. If a definition exists, quote the complete definition as
+7. If a definition exists, quote the complete definition as
 accurately as possible.
 
-7. Be concise but complete. State the source document title
+8. Be concise but complete. State the source document title
 for each answer.
 
-8. If the answer is not found in the context, say:
+9. If the answer is not found in the context, say:
 "I could not find the answer in the provided document."
 
-9. Format the answer as clean Markdown for a web interface:
+10. Format the answer as clean Markdown for a web interface:
 
 - Start with a direct answer or one-sentence summary.
 - Use short descriptive headings only when the answer has
@@ -148,7 +154,7 @@ for each answer.
 - Do not force a list when a short paragraph is clearer.
 - Do not add an "Answer" heading.
 
-10. Put the supporting document title on a final separate
+11. Put the supporting document title on a final separate
 line in this format: **Source:** document title.
 
 Answer:
@@ -159,6 +165,7 @@ Answer:
         response = tracked_ai_call(
             lambda: self.client.chat.completions.create(
                 model=CHAT_MODEL,
+                reasoning_effort=CHAT_REASONING_EFFORT,
                 messages=[
                     {
                         "role": "user",
