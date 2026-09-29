@@ -102,6 +102,34 @@ def test_retriever_scopes_every_search_path_to_owner():
     assert owners == ["user-a", "user-a", "user-a"]
 
 
+def test_exact_identifier_subtree_precedes_semantic_supplements():
+    retriever = object.__new__(Retriever)
+    vector_results = [
+        {"chunk_id": "outside", "text": "Similar section", "similarity": 0.9},
+        {"chunk_id": "child-2", "text": "Second child", "similarity": 0.8},
+    ]
+    node_results = [
+        {"chunk_id": "outside", "text": "Similar section", "similarity": 0.9},
+    ]
+    # Exact-identifier retrieval returns the anchor subtree in hierarchy order.
+    identifier_results = [
+        {"chunk_id": "anchor", "text": "Section 6", "similarity": 0.6},
+        {"chunk_id": "child-1", "text": "Subsection 1", "similarity": 0.5},
+        {"chunk_id": "child-2", "text": "Subsection 2", "similarity": 0.8},
+    ]
+
+    results = retriever._combine_results(
+        vector_results,
+        node_results,
+        identifier_results,
+        top_k=4,
+    )
+
+    assert [result["chunk_id"] for result in results] == [
+        "anchor", "child-1", "child-2", "outside",
+    ]
+
+
 def test_answer_prompt_requires_structured_markdown():
     captured = {}
 

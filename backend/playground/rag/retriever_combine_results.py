@@ -102,8 +102,8 @@ def main() -> None:
     # Confirm results below the threshold are removed.
     weak_removed = "chunk-weak" not in result_ids
 
-    # Confirm agreement across searches ranks first.
-    agreement_ranked_first = result_ids[0] == "chunk-10"
+    # Confirm an explicitly requested structural anchor ranks first.
+    anchor_ranked_first = result_ids[0] == "chunk-40"
 
     # Confirm identifier weighting beats one normal match.
     identifier_beats_single = (
@@ -123,7 +123,7 @@ def main() -> None:
     print("\nResults:")
     print(f"Duplicate merged: {duplicate_merged}")
     print(f"Weak result removed: {weak_removed}")
-    print(f"Agreement ranked first: {agreement_ranked_first}")
+    print(f"Exact anchor ranked first: {anchor_ranked_first}")
     print(
         "Identifier beats single normal match: "
         f"{identifier_beats_single}"
@@ -134,7 +134,7 @@ def main() -> None:
     # Stop immediately if any expected behavior fails.
     assert duplicate_merged
     assert weak_removed
-    assert agreement_ranked_first
+    assert anchor_ranked_first
     assert identifier_beats_single
     assert top_k_respected
 

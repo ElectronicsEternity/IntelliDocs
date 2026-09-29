@@ -143,4 +143,24 @@ class Retriever:
             key=lambda result: result["hybrid_score"],
             reverse=True,
         )
-        return ranked_results[:top_k]
+
+        # When the question names an exact structural node, keep that node's
+        # complete subtree ahead of global semantic results. This prevents
+        # individually strong but unrelated chunks from splitting the anchor.
+        anchored_results = []
+        anchored_ids = set()
+        for result in identifier_results:
+            chunk_id = result["chunk_id"]
+            if chunk_id in anchored_ids or chunk_id not in combined:
+                continue
+            anchored_results.append(combined[chunk_id])
+            anchored_ids.add(chunk_id)
+
+        # Existing reciprocal-rank fusion remains responsible for filling the
+        # context after the mandatory anchor bundle has been included.
+        supplementary_results = [
+            result
+            for result in ranked_results
+            if result["chunk_id"] not in anchored_ids
+        ]
+        return (anchored_results + supplementary_results)[:top_k]

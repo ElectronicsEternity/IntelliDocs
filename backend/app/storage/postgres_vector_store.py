@@ -312,11 +312,29 @@ class PostgresVectorStore:
         cursor = self.connection.cursor()
         cursor.execute(
             """
-            WITH RECURSIVE matched_nodes AS (
-                SELECT n.id
+            WITH RECURSIVE candidate_nodes AS (
+                -- A bilingual or multi-document corpus can contain several
+                -- nodes with the same structural identifier. Measure every
+                -- exact candidate before choosing one version of each anchor.
+                SELECT
+                    n.id,
+                    lower(replace(n.node_type, '_', ' ')) AS anchor_type,
+                    btrim(
+                        regexp_replace(
+                            lower(btrim(n.identifier)),
+                            '[^[:alnum:]]+',
+                            ' ',
+                            'g'
+                        )
+                    ) AS anchor_identifier,
+                    1 - (
+                        ne.embedding <=> %s::vector
+                    ) AS anchor_similarity
                 FROM document_nodes n
                 JOIN documents d ON d.id = n.document_id
+                JOIN node_embeddings ne ON ne.node_id = n.id
                 WHERE d.user_id = %s
+                AND ne.embedding_version = %s
                 AND n.identifier IS NOT NULL
                 AND btrim(n.identifier) <> ''
                 AND (
@@ -363,16 +381,42 @@ class PostgresVectorStore:
                         ) || ' %%'
                     )
                 )
+            ), matched_nodes AS (
+                -- Keep the best language/document version for each distinct
+                -- identifier mentioned in the question. Multiple explicit
+                -- anchors, such as Sections 4 and 6, therefore remain valid.
+                SELECT id, anchor_similarity
+                FROM (
+                    SELECT
+                        candidate_nodes.*,
+                        row_number() OVER (
+                            PARTITION BY anchor_type, anchor_identifier
+                            ORDER BY anchor_similarity DESC
+                        ) AS anchor_rank
+                    FROM candidate_nodes
+                ) ranked_candidates
+                WHERE anchor_rank = 1
             ), hierarchy AS (
-                SELECT id AS root_id, id AS node_id
-                FROM matched_nodes
+                -- Preserve depth-first hierarchy order so the complete
+                -- anchor is presented as one coherent evidence bundle.
+                SELECT
+                    mn.id AS root_id,
+                    mn.id AS node_id,
+                    mn.anchor_similarity,
+                    ARRAY[n.sequence_no] AS hierarchy_order
+                FROM matched_nodes mn
+                JOIN document_nodes n ON n.id = mn.id
                 UNION ALL
-                SELECT h.root_id, child.id
+                SELECT
+                    h.root_id,
+                    child.id,
+                    h.anchor_similarity,
+                    h.hierarchy_order || child.sequence_no
                 FROM hierarchy h
                 JOIN document_nodes child
                     ON child.parent_id = h.node_id
             )
-            SELECT DISTINCT
+            SELECT
                 c.id, c.document_id, c.node_id,
                 c.content_type, c.text, c.metadata,
                 COALESCE(d.title, d.filename),
@@ -387,12 +431,18 @@ class PostgresVectorStore:
             LEFT JOIN document_nodes n ON n.id = c.node_id
             WHERE d.user_id = %s
             -- Exact structure decides eligibility.
-            -- Similarity only orders the matching chunks.
-            ORDER BY similarity DESC
+            -- Hierarchy order keeps the anchor and all children together;
+            -- semantic similarity was already used to choose the best anchor.
+            ORDER BY
+                h.anchor_similarity DESC,
+                h.hierarchy_order,
+                c.chunk_number
             LIMIT %s
             """,
             (
+                embedding,
                 owner_id,
+                CURRENT_EMBEDDING_VERSION,
                 query,
                 query,
                 embedding,
