@@ -23,12 +23,14 @@ from pathlib import Path
 from openai import OpenAI
 
 from app.config import settings
-from app.constants import DOCUMENT_PROFILER_MODEL
 from app.indexing.hierarchy_prompt_rules import OPENING_TEXT_RULES
 from app.services.usage.ai_usage import tracked_ai_call
 from app.indexing.document_profile_validator import (
     DocumentProfileValidationError,
     DocumentProfileValidator,
+)
+from app.indexing.source_hierarchy_validator import (
+    validate_source_hierarchy_completeness,
 )
 
 
@@ -40,9 +42,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROFILES_FOLDER = (
     PROJECT_ROOT / "documents" / "Profiles"
 )
-MAX_PROFILE_ATTEMPTS = 3
-
-
 # ==========================================================
 # Document Profiler
 # ==========================================================
@@ -54,7 +53,11 @@ class DocumentProfiler:
 
         # Use the configured project API key.
         self.client = OpenAI(
-            api_key=settings.OPENAI_API_KEY
+            api_key=settings.OPENAI_API_KEY,
+            # Disable hidden SDK retries so every paid request is explicit and logged.
+            max_retries=0,
+            # Long legal PDFs need more time than the SDK's ordinary request window.
+            timeout=1200,
         )
         # Reuse one validator for every response attempt.
         self.validator = DocumentProfileValidator()
@@ -81,8 +84,11 @@ class DocumentProfiler:
         # No correction errors exist before the first request.
         previous_errors = ()
 
-        # Permit one original request and two corrections.
-        for attempt in range(1, MAX_PROFILE_ATTEMPTS + 1):
+        # Convert the configured repair count into total calls: one initial plus repairs.
+        total_attempts = 1 + settings.HIERARCHY_REPAIR_MAX_ATTEMPTS
+
+        # Permit the original request and only the configured number of corrections.
+        for attempt in range(1, total_attempts + 1):
 
             # Use the original profiler prompt initially.
             prompt = base_prompt
@@ -97,39 +103,41 @@ class DocumentProfiler:
 
             # Send the current attempt to OpenAI.
             response = tracked_ai_call(
-                lambda: self.client.responses.create(model=DOCUMENT_PROFILER_MODEL, input=prompt),
-                activity="profiling", model=DOCUMENT_PROFILER_MODEL,
-                user_id=owner_id, document_id=document_id, attempt=attempt,
+                lambda: self.client.responses.create(
+                    model=settings.HIERARCHY_PROFILE_MODEL,
+                    reasoning={
+                        "effort": settings.HIERARCHY_REASONING_EFFORT,
+                    },
+                    max_output_tokens=settings.HIERARCHY_MAX_OUTPUT_TOKENS,
+                    input=prompt,
+                ),
+                activity="profiling",
+                model=settings.HIERARCHY_PROFILE_MODEL,
+                user_id=owner_id,
+                document_id=document_id,
+                attempt=attempt,
             )
             # Preserve the exact response before parsing it.
-            raw_output = response.output_text
+            raw_output = getattr(response, "output_text", "") or ""
 
-            # Parse and validate valid-looking JSON responses.
-            try:
+            # The Responses API can return partial output without raising an exception.
+            response_status = getattr(response, "status", "completed")
+            incomplete_details = getattr(response, "incomplete_details", None)
 
-                # Convert JSON text into Python dictionaries.
-                hierarchy = json.loads(raw_output)
-
-                # Validate structure before database import.
-                result = self.validator.validate(
-                    hierarchy=hierarchy,
-                    expected_language=document_language,
-                    expected_page_count=page_count,
-                    require_mapping_metadata=page_count is not None,
-                )
-                # Keep exact errors for saving and retrying.
-                errors = result.errors
-
-            # Convert malformed JSON into a validation error.
-            except json.JSONDecodeError as error:
-
-                # No parsed hierarchy exists this attempt.
+            # Reject partial JSON before attempting to parse or import it.
+            if response_status != "completed":
                 hierarchy = None
-
-                # Explain where JSON parsing failed.
+                incomplete_reason = getattr(incomplete_details, "reason", "unknown")
                 errors = (
-                    "The response is not valid JSON: "
-                    f"{error.msg} at line {error.lineno}.",
+                    "The hierarchy API response was incomplete "
+                    f"(reason: {incomplete_reason}).",
+                )
+            else:
+                hierarchy, errors = self._parse_and_validate(
+                    raw_output=raw_output,
+                    document_text=document_text,
+                    document_language=document_language,
+                    page_count=page_count,
                 )
 
             # Save accepted and rejected attempts for review.
@@ -140,6 +148,12 @@ class DocumentProfiler:
                 raw_output=raw_output,
                 hierarchy=hierarchy,
                 errors=errors,
+                response_status=response_status,
+                incomplete_reason=(
+                    getattr(incomplete_details, "reason", None)
+                    if incomplete_details is not None
+                    else None
+                ),
             )
 
             # Accept only a valid dictionary hierarchy.
@@ -174,6 +188,42 @@ class DocumentProfiler:
         raise DocumentProfileValidationError(
             previous_errors
         )
+
+    # Parse one completed API response and run structural plus source checks.
+    def _parse_and_validate(
+        self,
+        *,
+        raw_output: str,
+        document_text: str,
+        document_language: str,
+        page_count: int | None,
+    ) -> tuple[object, tuple[str, ...]]:
+        try:
+            # Convert the model's JSON text into the hierarchy object.
+            hierarchy = json.loads(raw_output)
+
+            # Enforce the JSON contract, page coverage, ordering and relationships.
+            result = self.validator.validate(
+                hierarchy=hierarchy,
+                expected_language=document_language,
+                expected_page_count=page_count,
+                require_mapping_metadata=page_count is not None,
+            )
+
+            # Detect severe omissions that valid JSON alone cannot reveal.
+            completeness_errors = validate_source_hierarchy_completeness(
+                hierarchy=hierarchy,
+                document_text=document_text,
+                page_count=page_count,
+            )
+            return hierarchy, result.errors + completeness_errors
+
+        except json.JSONDecodeError as error:
+            # Preserve a precise parse error so the next repair can correct it.
+            return None, (
+                "The response is not valid JSON: "
+                f"{error.msg} at line {error.lineno}.",
+            )
 
     # Ask the profiler to correct its rejected response.
     def _build_retry_prompt(
@@ -210,6 +260,11 @@ children flattened at the same level.
 Place governed content beneath the deepest applicable HEADING
 or SUBHEADING. Do not create unlabeled container nodes.
 
+When validation reports missing SECTION or SUBSECTION families,
+return the complete hierarchy from the first page through the
+last page. Add every omitted provision; do not return only Parts,
+Schedules, tables, or the specifically named examples.
+
 PREVIOUS RESPONSE
 
 {previous_output}
@@ -226,6 +281,8 @@ Return a complete corrected hierarchy as JSON only.
         raw_output: str,
         hierarchy: object,
         errors: tuple[str, ...],
+        response_status: str,
+        incomplete_reason: str | None,
     ) -> None:
 
         # Resolve this user's document-specific folder.
@@ -249,6 +306,9 @@ Return a complete corrected hierarchy as JSON only.
             "accepted": not errors,
             "errors": list(errors),
             "parsed_json": hierarchy is not None,
+            "response_status": response_status,
+            "incomplete_reason": incomplete_reason,
+            "model": settings.HIERARCHY_PROFILE_MODEL,
         }
         # Save the untouched response even when JSON is broken.
         response_path.write_text(

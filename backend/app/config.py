@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     PRO_MAX_PAGES_PER_MONTH: int = 5000
     PRO_AI_BUDGET_USD: float = 20.0
     PROCESSING_STALE_AFTER_SECONDS: int = 60 * 60
+    # Use the stronger reasoning model selected for production hierarchy retrieval.
+    HIERARCHY_PROFILE_MODEL: str = "gpt-5.6-sol"
+    # High reasoning improves long-document structural coverage and ordering.
+    HIERARCHY_REASONING_EFFORT: str = "high"
+    # Leave enough output room for complete legal-document hierarchy JSON.
+    HIERARCHY_MAX_OUTPUT_TOKENS: int = 32768
     # Additional targeted correction calls after the initial hierarchy request.
     HIERARCHY_REPAIR_MAX_ATTEMPTS: int = 2
     # Standard USD rates per million tokens; historical records keep a snapshot.
@@ -52,6 +58,8 @@ class Settings(BaseSettings):
     SEMANTIC_TABLE_MODEL: str = "gpt-5.6-sol"
     TABLE_REASONING_EFFORT: str = "high"
     TABLE_MAX_OUTPUT_TOKENS: int = 65536
+    # Allow one targeted correction when local checks prove a table was omitted.
+    TABLE_PROFILE_REPAIR_MAX_ATTEMPTS: int = 1
     AI_EMBEDDING_INPUT_RATE: float = 0.02
     RAG_TOP_K: int = 10
     FRONTEND_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"

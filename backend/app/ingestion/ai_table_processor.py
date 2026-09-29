@@ -19,6 +19,8 @@ from app.indexing.table_matrix import (
 from app.indexing.table_profile import (
     TABLE_PROFILE_PROMPT,
     TABLE_PROFILE_SCHEMA,
+    build_table_profile_repair_prompt,
+    find_front_matter_table_pages,
     validate_table_profile,
 )
 from app.services.usage.ai_usage import tracked_ai_call
@@ -26,7 +28,7 @@ from app.services.usage.ai_usage import tracked_ai_call
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROFILES_FOLDER = PROJECT_ROOT / "documents" / "Profiles"
-TABLE_CACHE_VERSION = 1
+TABLE_CACHE_VERSION = 2
 
 
 class AIVisualTableProcessor:
@@ -120,6 +122,7 @@ class AIVisualTableProcessor:
         schema: dict,
         owner_id: str,
         document_id: str,
+        attempt: int | None = None,
     ) -> dict:
         response = tracked_ai_call(
             lambda: self.client.responses.create(
@@ -144,6 +147,7 @@ class AIVisualTableProcessor:
             model=model,
             user_id=owner_id,
             document_id=document_id,
+            attempt=attempt,
         )
         if getattr(response, "status", None) != "completed":
             raise ValueError(f"{activity} returned an incomplete response.")
@@ -241,7 +245,17 @@ class AIVisualTableProcessor:
 
     def process(self, pdf_path: Path, *, owner_id: str, document_id: str) -> list[dict]:
         source_data = pdf_path.read_bytes()
-        page_count = len(PdfReader(BytesIO(source_data)).pages)
+        source_reader = PdfReader(BytesIO(source_data))
+        page_count = len(source_reader.pages)
+
+        # Extract lightweight text only to detect omitted front-matter metadata tables.
+        page_texts = [
+            page.extract_text() or ""
+            for page in source_reader.pages
+        ]
+
+        # These pages must be represented by an OpenAI table profile entry.
+        required_front_matter_pages = find_front_matter_table_pages(page_texts)
         cache_folder = self._cache_folder(owner_id, document_id)
         paths = {
             "manifest": cache_folder / "table_cache_manifest.json",
@@ -255,28 +269,65 @@ class AIVisualTableProcessor:
 
         profile = self._read_json(paths["profile"]) if cache_matches else None
         profile_errors = (
-            validate_table_profile(profile, page_count)
+            validate_table_profile(
+                profile,
+                page_count,
+                required_front_matter_pages,
+            )
             if isinstance(profile, dict)
             else ("Missing cached table profile.",)
         )
         profile_reused = not profile_errors
         if profile_errors:
-            profile = self._structured_call(
-                model=settings.TABLE_PROFILE_MODEL,
-                activity="table_identification",
-                filename=pdf_path.name,
-                pdf_data=source_data,
-                prompt=TABLE_PROFILE_PROMPT,
-                schema_name="pdf_table_profile",
-                schema=TABLE_PROFILE_SCHEMA,
-                owner_id=owner_id,
-                document_id=document_id,
-            )
-            self._write_json(paths["profile"], profile)
-            self._write_json(paths["manifest"], expected_manifest)
-            errors = validate_table_profile(profile, page_count)
+            # One initial request plus the configured targeted repair attempts.
+            total_attempts = 1 + settings.TABLE_PROFILE_REPAIR_MAX_ATTEMPTS
+            previous_profile = None
+            errors = profile_errors
+
+            for attempt in range(1, total_attempts + 1):
+                # The first call uses the canonical prompt; later calls receive exact errors.
+                prompt = (
+                    TABLE_PROFILE_PROMPT
+                    if previous_profile is None
+                    else build_table_profile_repair_prompt(previous_profile, errors)
+                )
+                profile = self._structured_call(
+                    model=settings.TABLE_PROFILE_MODEL,
+                    activity="table_identification",
+                    filename=pdf_path.name,
+                    pdf_data=source_data,
+                    prompt=prompt,
+                    schema_name="pdf_table_profile",
+                    schema=TABLE_PROFILE_SCHEMA,
+                    owner_id=owner_id,
+                    document_id=document_id,
+                    attempt=attempt,
+                )
+
+                # Save every paid response before validation so failures remain diagnosable.
+                self._write_json(
+                    cache_folder / f"table_profile_attempt_{attempt}.json",
+                    profile,
+                )
+                self._write_json(paths["profile"], profile)
+                errors = validate_table_profile(
+                    profile,
+                    page_count,
+                    required_front_matter_pages,
+                )
+                if not errors:
+                    break
+
+                # Supply the rejected profile and exact local errors to the repair call.
+                previous_profile = profile
+
             if errors:
-                raise ValueError("Table profile validation failed: " + " ".join(errors))
+                raise ValueError(
+                    "Table profile validation failed: " + " ".join(errors)
+                )
+
+            # Only a validated profile is allowed to make the cache reusable.
+            self._write_json(paths["manifest"], expected_manifest)
         else:
             print("Stage tables: reused validated table_profile.json.")
 

@@ -94,12 +94,20 @@ def test_real_embedding_adapter_logs_provider_usage(monkeypatch):
 
 def test_profiler_logs_each_validation_attempt(monkeypatch):
     from app.indexing.document_profiler import DocumentProfiler
+    from app.config import settings
     rows = []
+    request_arguments = []
     monkeypatch.setattr("app.services.usage.ai_usage._insert", rows.append)
     profiler = DocumentProfiler.__new__(DocumentProfiler)
     result = response("gpt-5", input_tokens=100, output_tokens=20)
     result.output_text = "{}"
-    profiler.client = NS(responses=NS(create=lambda **_kwargs: result))
+
+    # Capture request settings without sending any real OpenAI request.
+    def create(**kwargs):
+        request_arguments.append(kwargs)
+        return result
+
+    profiler.client = NS(responses=NS(create=create))
     validations = iter([NS(errors=("retry",)), NS(errors=())])
     profiler.validator = NS(validate=lambda **_kwargs: next(validations))
     profiler._build_prompt = lambda **_kwargs: "prompt"
@@ -109,6 +117,20 @@ def test_profiler_logs_each_validation_attempt(monkeypatch):
     assert profiler.generate_hierarchy("text", "en", "doc-a", "user-a") == {}
     assert [row["attempt"] for row in rows] == [1, 2]
     assert all(row["document_id"] == "doc-a" for row in rows)
+    assert all(
+        request["model"] == settings.HIERARCHY_PROFILE_MODEL
+        for request in request_arguments
+    )
+    assert all(
+        request["reasoning"] == {
+            "effort": settings.HIERARCHY_REASONING_EFFORT,
+        }
+        for request in request_arguments
+    )
+    assert all(
+        request["max_output_tokens"] == settings.HIERARCHY_MAX_OUTPUT_TOKENS
+        for request in request_arguments
+    )
 
 
 def test_chat_generator_logs_tokens_before_answer_is_returned(monkeypatch):

@@ -3,6 +3,16 @@
 TABLE_BORDER_STYLES = {"bordered", "borderless", "mixed", "uncertain"}
 TABLE_EXTRACTION_MODES = {"regular_matrix", "semantic_records"}
 
+# Purpose: detect common label/value publication-history layouts in front matter.
+FRONT_MATTER_FIELD_GROUPS = (
+    ("first enacted", "originally enacted"),
+    ("revised", "revision"),
+    ("latest amendment", "last amended"),
+    ("previous reprint", "reprint"),
+    ("date of publication", "published on"),
+    ("date of commencement", "commencement date"),
+)
+
 
 TABLE_PROFILE_SCHEMA = {
     "type": "object",
@@ -69,6 +79,15 @@ Do not report a contents list, ordinary two-column prose, signature block, or a
 schedule heading by itself as a table. Treat one table continuing over several
 pages as one logical table.
 
+A repeated front-matter label/value layout is a borderless table, not ordinary
+two-column prose. For example, identify the following as one two-column table
+even when it has no borders and no printed column headings:
+
+First enacted       | 1955 (F.M. Ordinance No. 38 of 1955)
+Revised             | 1981 (Act 265 w.e.f. 18 February 1982)
+Latest amendment    | 1 January 2023
+Previous reprints   | 1975; 2001; 2006
+
 Include genuine data tables in front matter, appendices, schedules, or other
 standalone locations even when they do not belong to a legal section or heading.
 Do not invent a hierarchy parent. Return their physical page range and table
@@ -104,7 +123,58 @@ table is omitted, duplicated, or split into separate table entries.
 """
 
 
-def validate_table_profile(profile: dict, expected_pages: int) -> tuple[str, ...]:
+def find_front_matter_table_pages(page_texts: list[str]) -> tuple[int, ...]:
+    """Find pages with several recognizable label/value metadata fields."""
+    candidate_pages = []
+
+    # Front matter is expected near the beginning; limiting the scan avoids body prose.
+    for page_number, page_text in enumerate(page_texts[:12], 1):
+        normalized_text = " ".join((page_text or "").lower().split())
+
+        # Count field families rather than raw phrases so synonyms cannot double-count.
+        matched_field_groups = sum(
+            1
+            for alternatives in FRONT_MATTER_FIELD_GROUPS
+            if any(phrase in normalized_text for phrase in alternatives)
+        )
+
+        # Three separate metadata fields provide conservative table-like evidence.
+        if matched_field_groups >= 3:
+            candidate_pages.append(page_number)
+
+    return tuple(candidate_pages)
+
+
+def build_table_profile_repair_prompt(
+    previous_profile: dict,
+    errors: tuple[str, ...],
+) -> str:
+    """Request one complete correction using precise local validation failures."""
+    import json
+
+    error_text = "\n".join(f"- {error}" for error in errors)
+    previous_json = json.dumps(previous_profile, ensure_ascii=False)
+    return f"""{TABLE_PROFILE_PROMPT}
+
+CORRECTION REQUIRED
+
+The previous table profile failed local validation:
+{error_text}
+
+Return the complete corrected table profile, preserving valid tables and adding
+every omitted table. A page named in an error contains repeated label/value
+front-matter records and must be represented as a borderless table.
+
+PREVIOUS PROFILE
+{previous_json}
+"""
+
+
+def validate_table_profile(
+    profile: dict,
+    expected_pages: int,
+    required_front_matter_pages: tuple[int, ...] = (),
+) -> tuple[str, ...]:
     """Return deterministic cross-field errors beyond JSON Schema checks."""
     errors = []
     if profile.get("page_count") != expected_pages:
@@ -112,6 +182,7 @@ def validate_table_profile(profile: dict, expected_pages: int) -> tuple[str, ...
             f"page_count {profile.get('page_count')} does not match PDF page count {expected_pages}."
         )
     seen_ids = set()
+    covered_pages = set()
     for index, table in enumerate(profile.get("tables", []), 1):
         label = f"table {index}"
         table_id = table.get("table_id")
@@ -122,6 +193,7 @@ def validate_table_profile(profile: dict, expected_pages: int) -> tuple[str, ...
         if not isinstance(start, int) or not isinstance(end, int) or not (1 <= start <= end <= expected_pages):
             errors.append(f"{label} has invalid page range {start}-{end}.")
             continue
+        covered_pages.update(range(start, end + 1))
         headings = table.get("column_headings", [])
         if len(headings) != table.get("column_count"):
             errors.append(f"{label} heading count does not equal column_count.")
@@ -138,4 +210,13 @@ def validate_table_profile(profile: dict, expected_pages: int) -> tuple[str, ...
                 and region.get("top", 1001) < region.get("bottom", -1)
             ):
                 errors.append(f"{label} has an invalid region on page {region.get('page')}.")
+
+    # Source-derived evidence prevents a valid-looking profile from silently omitting
+    # a repeated label/value table such as the Employment Act publication history.
+    for page_number in required_front_matter_pages:
+        if page_number not in covered_pages:
+            errors.append(
+                "No table covers front-matter page "
+                f"{page_number}, which contains repeated label/value records."
+            )
     return tuple(errors)

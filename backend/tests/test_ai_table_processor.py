@@ -180,3 +180,86 @@ def test_rejected_matrix_response_is_saved_for_diagnosis(tmp_path, monkeypatch):
         / "regular_table_matrices.json"
     )
     assert json.loads(saved_path.read_text(encoding="utf-8")) == invalid_matrix
+
+
+# Purpose: verify one targeted repair adds an omitted front-matter table.
+def test_missing_front_matter_table_triggers_profile_repair(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "document.pdf"
+    _one_page_pdf(pdf_path)
+    incomplete_profile = {
+        "document_title": "Test",
+        "page_count": 1,
+        "tables": [],
+    }
+    repaired_profile = {
+        "document_title": "Test",
+        "page_count": 1,
+        "tables": [{
+            "table_id": "publication-history",
+            "title": "Publication history",
+            "start_page": 1,
+            "end_page": 1,
+            "border_style": "borderless",
+            "extraction_mode": "regular_matrix",
+            "column_count": 2,
+            "header_row_count": 0,
+            "data_row_count": 1,
+            "column_headings": ["", ""],
+            "page_regions": [{
+                "page": 1, "left": 100, "top": 100,
+                "right": 900, "bottom": 900,
+            }],
+        }],
+    }
+    matrices = {
+        "document_title": "Test",
+        "tables": [{
+            "table_id": "publication-history",
+            "title": "Publication history",
+            "start_page": 1,
+            "end_page": 1,
+            "column_count": 2,
+            "columns": ["", ""],
+            "row_count": 1,
+            "rows": [{
+                "row_number": 1,
+                "cells": ["First enacted", "1955"],
+                "source_pages": [1],
+            }],
+        }],
+    }
+    processor = AIVisualTableProcessor(
+        client=object(),
+        profiles_folder=tmp_path / "profiles",
+    )
+    calls = []
+
+    # Force page 1 to represent the source-derived front-matter candidate.
+    monkeypatch.setattr(
+        "app.ingestion.ai_table_processor.find_front_matter_table_pages",
+        lambda _page_texts: (1,),
+    )
+
+    def structured_call(**kwargs):
+        calls.append(kwargs["activity"])
+        if kwargs["activity"] != "table_identification":
+            return matrices
+        return incomplete_profile if calls.count("table_identification") == 1 else repaired_profile
+
+    monkeypatch.setattr(processor, "_structured_call", structured_call)
+
+    result = processor.process(
+        pdf_path,
+        owner_id="user",
+        document_id="document",
+    )
+
+    assert calls == [
+        "table_identification",
+        "table_identification",
+        "regular_table_extraction",
+    ]
+    assert result[0]["table_id"] == "publication-history"
+    cache_folder = tmp_path / "profiles" / "user" / "document"
+    assert (cache_folder / "table_profile_attempt_1.json").is_file()
+    assert (cache_folder / "table_profile_attempt_2.json").is_file()
