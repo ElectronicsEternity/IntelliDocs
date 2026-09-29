@@ -84,12 +84,37 @@ def test_real_embedding_adapter_logs_provider_usage(monkeypatch):
     monkeypatch.setattr("app.services.usage.ai_usage._insert", rows.append)
     embedder = Embedder.__new__(Embedder)
     result = response("text-embedding-3-small", prompt_tokens=12, total_tokens=12)
-    result.data = [NS(embedding=[0.1])]
+    result.data = [NS(index=0, embedding=[0.1])]
     embedder.client = NS(embeddings=NS(create=lambda **_kwargs: result))
     with ai_usage_context(user_id="user-a", conversation_id="conversation-a", embedding_activity="query_embedding"):
         assert embedder.generate_embedding("question") == [0.1]
     assert rows[0]["activity"] == "query_embedding"
     assert rows[0]["conversation_id"] == "conversation-a"
+
+
+def test_embedding_adapter_batches_and_restores_provider_order(monkeypatch):
+    from app.rag.embedder import Embedder
+
+    monkeypatch.setattr("app.services.usage.ai_usage._insert", lambda _row: None)
+    embedder = Embedder.__new__(Embedder)
+    result = response("text-embedding-3-small", prompt_tokens=4, total_tokens=4)
+    # Provider indexes, rather than response list order, identify each input.
+    result.data = [
+        NS(index=1, embedding=[0.2]),
+        NS(index=0, embedding=[0.1]),
+    ]
+    requests = []
+    embedder.client = NS(
+        embeddings=NS(
+            create=lambda **kwargs: requests.append(kwargs) or result
+        )
+    )
+
+    assert embedder.generate_embeddings(["first", "second"]) == [
+        [0.1],
+        [0.2],
+    ]
+    assert requests[0]["input"] == ["first", "second"]
 
 
 def test_profiler_logs_each_validation_attempt(monkeypatch):

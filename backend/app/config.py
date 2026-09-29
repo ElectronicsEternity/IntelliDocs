@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # Allow one targeted correction when local checks prove a table was omitted.
     TABLE_PROFILE_REPAIR_MAX_ATTEMPTS: int = 1
     AI_EMBEDDING_INPUT_RATE: float = 0.02
+    # Group embedding inputs to reduce network requests while staying well
+    # below OpenAI's per-request input and token limits.
+    EMBEDDING_BATCH_SIZE: int = 100
     RAG_TOP_K: int = 10
     FRONTEND_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 

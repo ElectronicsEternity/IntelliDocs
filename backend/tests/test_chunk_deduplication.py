@@ -47,6 +47,9 @@ def test_indexer_deduplicates_before_persistence_and_embedding():
     indexer = DocumentIndexer.__new__(DocumentIndexer)
     indexer.vector_store = Mock()
     indexer.embedder = Mock()
+    indexer.embedding_checkpoints = Mock()
+    indexer.embedding_checkpoints.load.return_value = None
+    indexer.embedder.generate_embeddings.return_value = [[0.1]]
     indexer.get_document_analysis = Mock(return_value=SimpleNamespace(
         processing_status=DOCUMENT_STATUS_NEW, recommended_chunk_size=100))
     first = chunk()
@@ -55,9 +58,24 @@ def test_indexer_deduplicates_before_persistence_and_embedding():
     document = SimpleNamespace(id='doc', owner_id='owner', file_hash='hash')
     indexer.index_document(document, nodes=[])
     indexer.vector_store.add_chunk.assert_called_once_with(first, 'owner')
-    indexer.embedder.generate_embedding.assert_called_once_with(
-        first.text, user_id='owner', document_id='doc', activity='chunk_embedding')
+    indexer.embedder.generate_embeddings.assert_called_once_with(
+        [first.text], user_id='owner', document_id='doc', activity='chunk_embedding')
+    indexer.embedding_checkpoints.save.assert_called_once()
     indexer.vector_store.add_embedding.assert_called_once()
+
+
+def test_indexer_splits_large_embedding_work_into_configured_batches(monkeypatch):
+    indexer = DocumentIndexer.__new__(DocumentIndexer)
+    monkeypatch.setattr(
+        "app.indexing.document_indexer.settings.EMBEDDING_BATCH_SIZE",
+        2,
+    )
+
+    assert list(indexer._batches([1, 2, 3, 4, 5])) == [
+        [1, 2],
+        [3, 4],
+        [5],
+    ]
 
 
 def test_structured_table_owner_is_not_also_chunked_as_raw_text():

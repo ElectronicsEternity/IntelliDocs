@@ -22,6 +22,8 @@ from app.indexing.node_scope_extractor import (
     NodeScopeExtractor,
 )
 from app.indexing.table_node_linker import TableNodeLinker
+from app.indexing.embedding_checkpoint_store import EmbeddingCheckpointStore
+from app.config import settings
 
 from app.rag.chunk_analyzer import ChunkAnalyzer
 from app.rag.chunker import Chunker
@@ -45,6 +47,7 @@ class DocumentIndexer:
         self.vector_store = PostgresVectorStore()
         self.scope_extractor = NodeScopeExtractor()
         self.table_node_linker = TableNodeLinker()
+        self.embedding_checkpoints = EmbeddingCheckpointStore()
 
 
     def get_document_analysis(
@@ -200,52 +203,61 @@ class DocumentIndexer:
                 document.owner_id,
             )
 
-            for chunk in chunks:
-
-                self.vector_store.add_chunk(
-                    chunk,
-                    document.owner_id,
+            # Embed and commit small groups so a connection interruption cannot
+            # discard the complete indexing stage.
+            for batch_number, chunk_batch in enumerate(
+                self._batches(chunks),
+                start=1,
+            ):
+                texts = [chunk.text for chunk in chunk_batch]
+                embeddings = self._load_or_create_embeddings(
+                    texts=texts,
+                    document=document,
+                    activity="chunk_embedding",
+                    batch_number=batch_number,
                 )
-
-                embedding = (
-                    self.embedder.generate_embedding(
-                        chunk.text,
-                        user_id=document.owner_id,
-                        document_id=document.id,
-                        activity="chunk_embedding",
+                for chunk, embedding in zip(chunk_batch, embeddings):
+                    self.vector_store.add_chunk(chunk, document.owner_id)
+                    self.vector_store.add_embedding(
+                        chunk.id,
+                        embedding,
+                        document.owner_id,
                     )
-                )
-
-                self.vector_store.add_embedding(
-                    chunk.id,
-                    embedding,
-                    document.owner_id,
-                )
+                self.vector_store.commit()
 
             # Embed hierarchy labels once during ingestion.
             if nodes is not None:
-                for node in nodes:
-                    search_text = (
-                        self._build_node_search_text(node)
+                searchable_nodes = [
+                    (node, self._build_node_search_text(node))
+                    for node in nodes
+                ]
+                searchable_nodes = [
+                    (node, text)
+                    for node, text in searchable_nodes
+                    if text is not None
+                ]
+                for batch_number, node_batch in enumerate(
+                    self._batches(searchable_nodes),
+                    start=1,
+                ):
+                    texts = [text for _, text in node_batch]
+                    embeddings = self._load_or_create_embeddings(
+                        texts=texts,
+                        document=document,
+                        activity="node_embedding",
+                        batch_number=batch_number,
                     )
-
-                    if search_text is None:
-                        continue
-
-                    node_embedding = (
-                        self.embedder.generate_embedding(
-                            search_text,
-                            user_id=document.owner_id,
-                            document_id=document.id,
-                            activity="node_embedding",
+                    for (node, search_text), embedding in zip(
+                        node_batch,
+                        embeddings,
+                    ):
+                        self.vector_store.add_node_embedding(
+                            node_id=node.id,
+                            search_text=search_text,
+                            embedding=embedding,
+                            owner_id=document.owner_id,
                         )
-                    )
-                    self.vector_store.add_node_embedding(
-                        node_id=node.id,
-                        search_text=search_text,
-                        embedding=node_embedding,
-                        owner_id=document.owner_id,
-                    )
+                    self.vector_store.commit()
 
             self.vector_store.commit()
 
@@ -283,6 +295,50 @@ class DocumentIndexer:
                     document.owner_id,
                 )
             raise
+
+    # Yield ordered groups using the centrally configured provider batch size.
+    def _batches(self, items: list):
+        batch_size = max(1, settings.EMBEDDING_BATCH_SIZE)
+        for start in range(0, len(items), batch_size):
+            yield items[start:start + batch_size]
+
+    # Reuse a validated checkpoint or make and immediately save one paid call.
+    def _load_or_create_embeddings(
+        self,
+        *,
+        texts: list[str],
+        document,
+        activity: str,
+        batch_number: int,
+    ) -> list[list[float]]:
+        embeddings = self.embedding_checkpoints.load(
+            owner_id=document.owner_id,
+            document_id=document.id,
+            activity=activity,
+            batch_number=batch_number,
+            texts=texts,
+        )
+        if embeddings is not None:
+            print(
+                f"Stage index: reused {activity} batch {batch_number}."
+            )
+            return embeddings
+
+        embeddings = self.embedder.generate_embeddings(
+            texts,
+            user_id=document.owner_id,
+            document_id=document.id,
+            activity=activity,
+        )
+        self.embedding_checkpoints.save(
+            owner_id=document.owner_id,
+            document_id=document.id,
+            activity=activity,
+            batch_number=batch_number,
+            texts=texts,
+            embeddings=embeddings,
+        )
+        return embeddings
 
     # Combine meaningful node values for embedding.
     def _build_node_search_text(self, node) -> str | None:
