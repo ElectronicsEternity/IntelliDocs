@@ -86,20 +86,32 @@ def test_retriever_scopes_every_search_path_to_owner():
             return [0.1]
 
     class Store:
-        def search(self, *, owner_id, embedding, top_k):
+        def list_document_routing_candidates(self, *, owner_id, embedding):
+            owners.append(owner_id)
+            return [{
+                "document_id": "00000000-0000-0000-0000-000000000001",
+                "document_title": "Question guide",
+                "filename": "question-guide.pdf",
+                "topics": ["Question"],
+                "description_similarity": 0.9,
+            }]
+
+        def search(self, *, owner_id, embedding, top_k, document_id):
             owners.append(owner_id)
             return []
 
-        def search_node_hierarchy(self, *, owner_id, embedding, top_k):
+        def search_node_hierarchy(self, *, owner_id, embedding, top_k, document_id):
             owners.append(owner_id)
             return []
 
-        def search_exact_identifier(self, *, owner_id, query, embedding, top_k):
+        def search_exact_identifier(
+            self, *, owner_id, query, embedding, top_k, document_id
+        ):
             owners.append(owner_id)
             return []
 
     Retriever(Embedder(), Store()).retrieve("question", "user-a")
-    assert owners == ["user-a", "user-a", "user-a"]
+    assert owners == ["user-a", "user-a", "user-a", "user-a"]
 
 
 def test_exact_identifier_subtree_precedes_semantic_supplements():

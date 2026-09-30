@@ -22,6 +22,7 @@ from psycopg.types.json import Jsonb
 
 from app.constants import (
     CURRENT_EMBEDDING_VERSION,
+    CURRENT_ROUTING_PROFILE_VERSION,
     SIMILARITY_THRESHOLD,
     TOP_K,
 )
@@ -170,12 +171,95 @@ class PostgresVectorStore:
         )
         cursor.close()
 
+    # Persist the description embedding and hierarchy-title topics used only
+    # for document selection before normal chunk retrieval begins.
+    def upsert_document_routing_profile(
+        self,
+        *,
+        document_id: str,
+        owner_id: str,
+        description: str,
+        description_embedding,
+        topics: list[str],
+    ) -> None:
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO document_routing_profiles (
+                document_id, user_id, description, description_embedding,
+                topics, profile_version, updated_at
+            )
+            SELECT %s, %s, %s, %s, %s, %s, now()
+            WHERE EXISTS (
+                SELECT 1 FROM documents WHERE id = %s AND user_id = %s
+            )
+            ON CONFLICT (document_id) DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                description = EXCLUDED.description,
+                description_embedding = EXCLUDED.description_embedding,
+                topics = EXCLUDED.topics,
+                profile_version = EXCLUDED.profile_version,
+                updated_at = now()
+            """,
+            (
+                document_id,
+                owner_id,
+                description,
+                description_embedding,
+                Jsonb(topics),
+                CURRENT_ROUTING_PROFILE_VERSION,
+                document_id,
+                owner_id,
+            ),
+        )
+        cursor.close()
+
+    # Return every owned document with its routing signals. A left join keeps
+    # older documents searchable until the user reprocesses them.
+    def list_document_routing_candidates(self, *, owner_id: str, embedding) -> list[dict]:
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """
+            SELECT
+                d.id,
+                COALESCE(d.title, d.filename),
+                d.filename,
+                COALESCE(rp.topics, '[]'::jsonb),
+                CASE
+                    WHEN rp.description_embedding IS NULL THEN 0.0
+                    ELSE 1 - (rp.description_embedding <=> %s::vector)
+                END AS description_similarity
+            FROM documents d
+            LEFT JOIN document_routing_profiles rp
+                ON rp.document_id = d.id
+               AND rp.user_id = d.user_id
+               AND rp.profile_version = %s
+            WHERE d.user_id = %s
+              AND d.processing_status = 'ready'
+            ORDER BY d.created_at DESC
+            """,
+            (embedding, CURRENT_ROUTING_PROFILE_VERSION, owner_id),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        return [
+            {
+                "document_id": str(row[0]),
+                "document_title": row[1],
+                "filename": row[2],
+                "topics": row[3],
+                "description_similarity": float(row[4] or 0.0),
+            }
+            for row in rows
+        ]
+
     # Find chunks by embedding similarity.
     def search(
         self,
         owner_id: str,
         embedding,
         top_k: int = TOP_K,
+        document_id: str | None = None,
     ) -> list[dict]:
         cursor = self.connection.cursor()
         cursor.execute(
@@ -193,6 +277,7 @@ class PostgresVectorStore:
             JOIN documents d ON d.id = c.document_id
             LEFT JOIN document_nodes n ON n.id = c.node_id
             WHERE d.user_id = %s
+            AND (%s::uuid IS NULL OR d.id = %s::uuid)
             AND 1 - (e.embedding <=> %s::vector) >= %s
             ORDER BY similarity DESC
             LIMIT %s
@@ -200,6 +285,8 @@ class PostgresVectorStore:
             (
                 embedding,
                 owner_id,
+                document_id,
+                document_id,
                 embedding,
                 SIMILARITY_THRESHOLD,
                 top_k,
@@ -215,6 +302,7 @@ class PostgresVectorStore:
         owner_id: str,
         embedding,
         top_k: int = TOP_K,
+        document_id: str | None = None,
     ) -> list[dict]:
         cursor = self.connection.cursor()
         cursor.execute(
@@ -229,6 +317,7 @@ class PostgresVectorStore:
                 JOIN document_nodes n ON n.id = ne.node_id
                 JOIN documents d ON d.id = n.document_id
                 WHERE d.user_id = %s
+                AND (%s::uuid IS NULL OR d.id = %s::uuid)
                 AND ne.embedding_version = %s
                 AND 1 - (
                     ne.embedding <=> %s::vector
@@ -271,6 +360,7 @@ class PostgresVectorStore:
             JOIN documents d ON d.id = c.document_id
             LEFT JOIN document_nodes n ON n.id = c.node_id
             WHERE d.user_id = %s
+            AND (%s::uuid IS NULL OR d.id = %s::uuid)
             AND 1 - (e.embedding <=> %s::vector) >= %s
             ORDER BY rn.node_similarity DESC, similarity DESC
             LIMIT %s
@@ -278,12 +368,16 @@ class PostgresVectorStore:
             (
                 embedding,
                 owner_id,
+                document_id,
+                document_id,
                 CURRENT_EMBEDDING_VERSION,
                 embedding,
                 SIMILARITY_THRESHOLD,
                 top_k,
                 embedding,
                 owner_id,
+                document_id,
+                document_id,
                 embedding,
                 SIMILARITY_THRESHOLD,
                 top_k,
@@ -308,6 +402,7 @@ class PostgresVectorStore:
         query: str,
         embedding,
         top_k: int = TOP_K,
+        document_id: str | None = None,
     ) -> list[dict]:
         cursor = self.connection.cursor()
         cursor.execute(
@@ -334,6 +429,7 @@ class PostgresVectorStore:
                 JOIN documents d ON d.id = n.document_id
                 JOIN node_embeddings ne ON ne.node_id = n.id
                 WHERE d.user_id = %s
+                AND (%s::uuid IS NULL OR d.id = %s::uuid)
                 AND ne.embedding_version = %s
                 AND n.identifier IS NOT NULL
                 AND btrim(n.identifier) <> ''
@@ -430,6 +526,7 @@ class PostgresVectorStore:
             JOIN documents d ON d.id = c.document_id
             LEFT JOIN document_nodes n ON n.id = c.node_id
             WHERE d.user_id = %s
+            AND (%s::uuid IS NULL OR d.id = %s::uuid)
             -- Exact structure decides eligibility.
             -- Hierarchy order keeps the anchor and all children together;
             -- semantic similarity was already used to choose the best anchor.
@@ -442,11 +539,15 @@ class PostgresVectorStore:
             (
                 embedding,
                 owner_id,
+                document_id,
+                document_id,
                 CURRENT_EMBEDDING_VERSION,
                 query,
                 query,
                 embedding,
                 owner_id,
+                document_id,
+                document_id,
                 top_k,
             ),
         )

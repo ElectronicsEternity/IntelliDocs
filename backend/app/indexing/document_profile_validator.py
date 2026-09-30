@@ -107,6 +107,7 @@ class DocumentProfileValidator:
         expected_language: str | None = None,
         expected_page_count: int | None = None,
         require_mapping_metadata: bool = False,
+        require_routing_metadata: bool = False,
     ) -> DocumentProfileValidationResult:
 
         # Collect every issue instead of stopping at the first.
@@ -181,6 +182,14 @@ class DocumentProfileValidator:
                 expected_page_count=expected_page_count,
                 errors=errors,
             )
+
+        if require_routing_metadata:
+            description = hierarchy.get("document_description")
+            if not isinstance(description, str) or not description.strip():
+                errors.append(
+                    "The DOCUMENT root must contain a non-empty "
+                    "document_description."
+                )
 
         # Return all errors and useful inspection statistics.
         return DocumentProfileValidationResult(

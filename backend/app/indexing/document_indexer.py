@@ -29,6 +29,7 @@ from app.rag.chunk_analyzer import ChunkAnalyzer
 from app.rag.chunker import Chunker
 from app.rag.chunk_deduplicator import deduplicate_chunks
 from app.rag.embedder import Embedder
+from app.rag.document_router import derive_topics
 from app.rag.tokenizer import Tokenizer
 
 from app.storage.postgres_vector_store import (
@@ -295,6 +296,27 @@ class DocumentIndexer:
                     document.owner_id,
                 )
             raise
+
+    # Create the routing profile from accepted hierarchy output. The model
+    # supplies only the description; hierarchy-title topics are derived here.
+    def store_document_routing_profile(self, document, hierarchy: dict) -> None:
+        description = str(hierarchy.get("document_description") or "").strip()
+        if not description:
+            raise ValueError("Accepted hierarchy has no document description.")
+        embedding = self.embedder.generate_embedding(
+            description,
+            user_id=document.owner_id,
+            document_id=document.id,
+            activity="document_profile_embedding",
+        )
+        self.vector_store.upsert_document_routing_profile(
+            document_id=document.id,
+            owner_id=document.owner_id,
+            description=description,
+            description_embedding=embedding,
+            topics=derive_topics(hierarchy),
+        )
+        self.vector_store.commit()
 
     # Yield ordered groups using the centrally configured provider batch size.
     def _batches(self, items: list):

@@ -17,6 +17,8 @@
 
 from app.constants import SIMILARITY_THRESHOLD, TOP_K
 from app.rag.embedder import Embedder
+from app.rag.document_router import DocumentRouter
+from app.config import settings
 from app.services.usage.ai_usage import ai_usage_context
 from app.storage.postgres_vector_store import (
     PostgresVectorStore,
@@ -36,6 +38,7 @@ class Retriever:
     ):
         self.embedder = embedder
         self.vector_store = vector_store
+        self.document_router = DocumentRouter(vector_store)
 
     # Run vector and hierarchy retrieval together.
     def retrieve(
@@ -47,37 +50,73 @@ class Retriever:
         with ai_usage_context(user_id=owner_id, embedding_activity="query_embedding"):
             question_embedding = self.embedder.generate_embedding(question)
 
-        # Search all chunks directly by meaning.
-        vector_results = self.vector_store.search(
+        selected_documents, broad_fallback = self.document_router.select(
+            question=question,
             owner_id=owner_id,
             embedding=question_embedding,
-            top_k=top_k,
         )
-        # Search similar hierarchy nodes and descendants.
-        node_results = (
-            self.vector_store.search_node_hierarchy(
+        if not selected_documents:
+            return []
+
+        per_document_results = []
+        for document in selected_documents:
+            document_id = document["document_id"]
+            candidate_limit = (
+                settings.DOCUMENT_FALLBACK_CHUNKS_PER_DOCUMENT
+                if broad_fallback else top_k
+            )
+            # Keep the established three retrieval paths unchanged, but run
+            # them independently inside each selected document.
+            vector_results = self.vector_store.search(
                 owner_id=owner_id,
                 embedding=question_embedding,
-                top_k=top_k,
+                top_k=candidate_limit,
+                document_id=document_id,
             )
-        )
-
-        # Exact structural references bypass semantic guessing.
-        identifier_results = (
-            self.vector_store.search_exact_identifier(
+            node_results = self.vector_store.search_node_hierarchy(
+                owner_id=owner_id,
+                embedding=question_embedding,
+                top_k=candidate_limit,
+                document_id=document_id,
+            )
+            identifier_results = self.vector_store.search_exact_identifier(
                 owner_id=owner_id,
                 query=question,
                 embedding=question_embedding,
-                top_k=top_k,
+                top_k=candidate_limit,
+                document_id=document_id,
             )
-        )
+            combined = self._combine_results(
+                vector_results,
+                node_results,
+                identifier_results,
+                candidate_limit,
+            )
+            for result in combined:
+                result["document_selection_score"] = document["combined_score"]
+            per_document_results.append(combined)
 
-        return self._combine_results(
-            vector_results,
-            node_results,
-            identifier_results,
-            top_k,
-        )
+        # Interleave documents by their local result rank so one long document
+        # cannot consume the entire answer context before another likely one.
+        return self._round_robin(per_document_results, top_k)
+
+    @staticmethod
+    def _round_robin(result_groups: list[list[dict]], top_k: int) -> list[dict]:
+        results = []
+        seen = set()
+        max_length = max((len(group) for group in result_groups), default=0)
+        for rank in range(max_length):
+            for group in result_groups:
+                if rank >= len(group):
+                    continue
+                result = group[rank]
+                if result["chunk_id"] in seen:
+                    continue
+                seen.add(result["chunk_id"])
+                results.append(result)
+                if len(results) == top_k:
+                    return results
+        return results
 
     # Fuse ranked lists while retaining one copy per chunk.
     def _combine_results(

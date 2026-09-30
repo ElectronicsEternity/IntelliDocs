@@ -105,6 +105,11 @@ class DocumentIngestionWorkflow:
             )
             print("Stage hierarchy: validated profile received.")
 
+            # Save document-level routing data before local node mapping. This
+            # lets later questions choose likely documents without another AI call.
+            self.indexer.store_document_routing_profile(document, hierarchy)
+            print("Stage hierarchy: document selection profile stored.")
+
             # Convert hierarchy JSON into database nodes.
             mapping_metadata = self.importer.import_hierarchy(
                 document_id=document.id,

@@ -231,6 +231,7 @@ class DocumentProfiler:
                 expected_language=document_language,
                 expected_page_count=page_count,
                 require_mapping_metadata=page_count is not None,
+                require_routing_metadata=True,
             )
 
             # Detect severe omissions that valid JSON alone cannot reveal.
@@ -683,7 +684,8 @@ directly under Section 67 unless an intervening identifier is actually printed.
 
 11. Preserve deleted, omitted, repealed, reserved, or inactive provisions.
 
-12. Do not summarize content.
+12. Do not summarize individual nodes or body content. The only permitted
+summary is the root-level document_description required below.
 
 13. Do not extract body text except the short opening_text excerpt required below.
 
@@ -715,6 +717,10 @@ Every node MUST contain:
 - start_page
 - children
 
+The DOCUMENT root must also contain:
+
+- document_description
+
 Rules:
 
 - If title does not exist, use an empty string.
@@ -725,6 +731,10 @@ Rules:
   backward or forward to another page.
 - children must always be present.
 - If a node has no children, return an empty array.
+- document_description must be a factual 250-350 word description of the
+  document as a whole. State its subject, purpose, major areas covered,
+  jurisdiction and document type when the source supports them. Use only
+  information present in the supplied document. Do not list every node title.
 
 PAGE LABEL AND COVERAGE RULES
 
@@ -782,6 +792,7 @@ Root node must always be:
   "language": "{document_language}",
   "identifier": "",
   "title": "",
+  "document_description": "A factual 250-350 word description of this document.",
   "opening_text": null,
   "start_page": 1,
   "page_coverage": [

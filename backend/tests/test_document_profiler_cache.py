@@ -11,6 +11,10 @@ def _valid_hierarchy():
         "language": "en",
         "identifier": "",
         "title": "",
+        "document_description": (
+            "This annual report describes the organization's reporting "
+            "period, performance, and revenue information."
+        ),
         "opening_text": None,
         "start_page": 1,
         "page_coverage": [{

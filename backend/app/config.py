@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     # Group embedding inputs to reduce network requests while staying well
     # below OpenAI's per-request input and token limits.
     EMBEDDING_BATCH_SIZE: int = 100
+    # Document selection happens before the existing within-document retrieval.
+    DOCUMENT_TITLE_FILENAME_WEIGHT: float = 0.50
+    DOCUMENT_DESCRIPTION_WEIGHT: float = 0.35
+    DOCUMENT_HIERARCHY_TITLE_WEIGHT: float = 0.15
+    DOCUMENT_ROUTING_MIN_SCORE: float = 0.40
+    DOCUMENT_ROUTING_MAX_DOCUMENTS: int = 3
+    DOCUMENT_FALLBACK_CHUNKS_PER_DOCUMENT: int = 3
     RAG_TOP_K: int = 10
     FRONTEND_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
