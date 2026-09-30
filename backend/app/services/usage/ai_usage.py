@@ -70,7 +70,9 @@ def build_record(response, *, activity, model, user_id, document_id=None, conver
         "document_id": document_id, "conversation_id": conversation_id,
         "activity": activity, "model": reported_model,
         "request_id": _get(response, "_request_id") or _get(error, "request_id"),
-        "response_id": _get(response, "id"), "attempt": attempt,
+        # Non-retry calls may pass None explicitly. Store the first-attempt
+        # value required by the database so the blocked call remains visible.
+        "response_id": _get(response, "id"), "attempt": attempt or 1,
         "status": "api_error" if error else ("completed" if usage is not None else "usage_missing"),
         "input_tokens": input_tokens, "cached_input_tokens": cached,
         "output_tokens": output_tokens, "reasoning_tokens": reasoning, "total_tokens": total,

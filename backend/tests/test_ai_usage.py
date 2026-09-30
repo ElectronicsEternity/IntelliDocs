@@ -68,6 +68,18 @@ def test_missing_usage_and_unknown_model_do_not_claim_zero_cost():
     assert unknown["estimated_cost_usd"] is None
 
 
+def test_missing_attempt_number_defaults_to_first_attempt():
+    row = build_record(
+        None,
+        activity="regular_table_extraction",
+        model="gpt-5.6-terra",
+        user_id="user-a",
+        attempt=None,
+        error=RuntimeError("blocked"),
+    )
+    assert row["attempt"] == 1
+
+
 def test_context_restores_owner_and_errors_have_unknown_usage(monkeypatch):
     rows = []
     monkeypatch.setattr("app.services.usage.ai_usage._insert", rows.append)
