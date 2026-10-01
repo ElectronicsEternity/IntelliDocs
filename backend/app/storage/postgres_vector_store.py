@@ -521,7 +521,9 @@ class PostgresVectorStore:
                 d.filename, n.node_type, n.identifier,
                 n.title,
                 1 - (e.embedding <=> %s::vector)
-                    AS similarity
+                    AS similarity,
+                -- Carry the matched root so its descendants count as one unit.
+                h.root_id AS exact_anchor_id
             FROM hierarchy h
             JOIN chunks c ON c.node_id = h.node_id
             JOIN embeddings e ON e.chunk_id = c.id
@@ -555,7 +557,13 @@ class PostgresVectorStore:
         )
         rows = cursor.fetchall()
         cursor.close()
-        return [self._map_search_row(row) for row in rows]
+        results = []
+        for row in rows:
+            item = self._map_search_row(row)
+            # The final column identifies the section, not the individual child.
+            item["exact_anchor_id"] = str(row[12])
+            results.append(item)
+        return results
 
     # Convert a retrieval row into named values.
     def _map_search_row(self, row: tuple) -> dict:

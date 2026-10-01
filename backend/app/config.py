@@ -81,7 +81,10 @@ class Settings(BaseSettings):
     DOCUMENT_ROUTING_MIN_SCORE: float = 0.40
     DOCUMENT_ROUTING_MAX_DOCUMENTS: int = 3
     DOCUMENT_FALLBACK_CHUNKS_PER_DOCUMENT: int = 3
-    RAG_TOP_K: int = 10
+    # Final allowance counts complete sections as units, not individual chunks.
+    RAG_TOP_K: int = 20
+    # Keep each document's candidate allowance independent of the final limit.
+    RAG_DOCUMENT_TOP_K: int = 10
     # Capture exact answer requests during local testing; disable for production
     # until private storage and automatic retention are configured.
     RAG_DEBUG_CAPTURE_ENABLED: bool = True

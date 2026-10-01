@@ -15,7 +15,7 @@
 #
 # ========================================
 
-from app.constants import SIMILARITY_THRESHOLD, TOP_K
+from app.constants import SIMILARITY_THRESHOLD
 from app.rag.embedder import Embedder
 from app.rag.document_router import DocumentRouter
 from app.config import settings
@@ -45,8 +45,10 @@ class Retriever:
         self,
         question: str,
         owner_id: str,
-        top_k: int = TOP_K,
+        top_k: int | None = None,
     ) -> list[dict]:
+        # Use the central final allowance when no request-specific limit is set.
+        top_k = settings.RAG_TOP_K if top_k is None else top_k
         with ai_usage_context(user_id=owner_id, embedding_activity="query_embedding"):
             question_embedding = self.embedder.generate_embedding(question)
 
@@ -63,7 +65,7 @@ class Retriever:
             document_id = document["document_id"]
             candidate_limit = (
                 settings.DOCUMENT_FALLBACK_CHUNKS_PER_DOCUMENT
-                if broad_fallback else top_k
+                if broad_fallback else settings.RAG_DOCUMENT_TOP_K
             )
             # Keep the established three retrieval paths unchanged, but run
             # them independently inside each selected document.
@@ -104,18 +106,29 @@ class Retriever:
         anchors = []
         supplements = []
         for group in per_document_results:
-            anchors.extend(
-                result for result in group
-                if "exact_identifier" in result.get("match_types", [])
-            )
+            # Keep each matched root and its descendants together until both
+            # selection limits have been applied. Other chunks are single units.
+            document_anchors = {}
+            for result in group:
+                if "exact_identifier" in result.get("match_types", []):
+                    unit_id = result["retrieval_unit_id"]
+                    document_anchors.setdefault(unit_id, []).append(result)
+            anchors.extend(document_anchors.values())
             supplements.append([
                 result for result in group
                 if "exact_identifier" not in result.get("match_types", [])
             ])
-        # top_k limits supplementary evidence, but must not split an explicit
-        # section. A complete bundle may therefore exceed the requested count.
+        # Count section bundles, not their child chunks, against the final limit.
+        # Preserve every explicit section even if those units exceed top_k.
         remaining = max(0, top_k - len(anchors))
-        return anchors + self._round_robin(supplements, remaining)
+        selected_chunks = [chunk for unit in anchors for chunk in unit]
+        selected_chunks.extend(self._round_robin(supplements, remaining))
+        # Overlapping requested sections can share children. Keep the first copy
+        # in hierarchy order, preserving all original citation fields.
+        unique_chunks = {}
+        for chunk in selected_chunks:
+            unique_chunks.setdefault(chunk["chunk_id"], chunk)
+        return list(unique_chunks.values())
 
     @staticmethod
     def _round_robin(result_groups: list[list[dict]], top_k: int) -> list[dict]:
@@ -196,6 +209,13 @@ class Retriever:
                     rank_offset + rank
                 )
                 stored["match_types"].append(search_type)
+                if is_exact_identifier:
+                    # Document ID prevents equal section IDs across documents
+                    # from being mistaken for the same retrieval unit.
+                    root_id = result.get("exact_anchor_id", "matched-section")
+                    stored["retrieval_unit_id"] = (
+                        f"{result.get('document_id', '')}:section:{root_id}"
+                    )
 
         ranked_results = sorted(
             combined.values(),
@@ -222,6 +242,10 @@ class Retriever:
             for result in ranked_results
             if result["chunk_id"] not in anchored_ids
         ]
-        # Do not truncate exact subtrees to the semantic-result allowance.
-        remaining = max(0, top_k - len(anchored_results))
+        # A section's complete subtree consumes one slot, regardless of size.
+        # Separate explicitly requested roots consume separate slots.
+        anchor_unit_count = len({
+            result["retrieval_unit_id"] for result in anchored_results
+        })
+        remaining = max(0, top_k - anchor_unit_count)
         return anchored_results + supplementary_results[:remaining]

@@ -2,6 +2,7 @@ from app.services.rag.service import RagService
 from app.rag.generator import Generator
 from app.rag.retriever import Retriever
 from types import SimpleNamespace
+import pytest
 
 
 class FakeRetriever:
@@ -178,6 +179,83 @@ def test_fallback_preserves_complete_sections_in_multiple_documents():
         f"{doc}-{i}" for doc in ["a", "b"] for i in range(7)
     ]
     assert Retriever._round_robin([[{"chunk_id": "extra"}]], 0) == []
+
+
+def test_section_children_consume_one_local_selection_slot():
+    # Six child chunks plus nine supplements are ten units, not fifteen units.
+    retriever = object.__new__(Retriever)
+    exact = [
+        {"chunk_id": f"section-{i}", "document_id": "a",
+         "exact_anchor_id": "root-6", "text": str(i), "similarity": 0.5}
+        for i in range(6)
+    ]
+    semantic = [
+        {"chunk_id": f"extra-{i}", "text": str(i), "similarity": 0.8}
+        for i in range(10)
+    ]
+    result = retriever._combine_results(semantic, [], exact, top_k=10)
+    assert len(result) == 15
+    assert [item["chunk_id"] for item in result[6:]] == [f"extra-{i}" for i in range(9)]
+
+
+def test_distinct_section_roots_consume_distinct_slots():
+    # Sections 4 and 6 stay separate even within one document.
+    retriever = object.__new__(Retriever)
+    exact = [
+        {"chunk_id": f"{root}-{i}", "document_id": "a",
+         "exact_anchor_id": root, "text": str(i), "similarity": 0.5}
+        for root in ["root-4", "root-6"] for i in range(3)
+    ]
+    semantic = [
+        {"chunk_id": f"extra-{i}", "text": str(i), "similarity": 0.8}
+        for i in range(4)
+    ]
+    result = retriever._combine_results(semantic, [], exact, top_k=3)
+    assert len(result) == 7
+    assert result[-1]["chunk_id"] == "extra-0"
+
+
+@pytest.mark.parametrize("unit_limit", [10, 20])
+def test_cross_document_limit_counts_section_units_not_child_chunks(unit_limit):
+    class Embedder:
+        def generate_embedding(self, question):
+            return [0.1]
+
+    class Store:
+        def list_document_routing_candidates(self, **kwargs):
+            return [
+                {"document_id": doc, "document_title": doc, "filename": doc,
+                 "topics": [], "description_similarity": 0.9}
+                for doc in ["a", "b"]
+            ]
+
+        def search(self, **kwargs):
+            doc = kwargs["document_id"]
+            return [
+                {"chunk_id": f"{doc}-extra-{i}", "document_id": doc,
+                 "text": str(i), "similarity": 0.9}
+                for i in range(10)
+            ]
+
+        def search_node_hierarchy(self, **kwargs):
+            return []
+
+        def search_exact_identifier(self, **kwargs):
+            doc = kwargs["document_id"]
+            return [
+                {"chunk_id": f"{doc}-section-{i}", "document_id": doc,
+                 "exact_anchor_id": "root-6", "text": str(i), "similarity": 0.5}
+                for i in range(6)
+            ]
+
+    results = Retriever(Embedder(), Store()).retrieve("Section 6", "user-a", top_k=unit_limit)
+    # Two six-chunk sections consume two units; remaining slots hold supplements.
+    supplements_per_document = (unit_limit - 2) // 2
+    assert len(results) == 12 + unit_limit - 2
+    assert sum("exact_identifier" in item["match_types"] for item in results) == 12
+    assert [item["chunk_id"] for item in results[12:]] == [
+        f"{doc}-extra-{i}" for i in range(supplements_per_document) for doc in ["a", "b"]
+    ]
 
 
 def test_answer_prompt_requires_structured_markdown():
