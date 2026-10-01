@@ -74,8 +74,8 @@ TOP_K = 10
 # for a chunk to be considered relevant
 SIMILARITY_THRESHOLD = 0.4
 
-# Use the stronger mini model for legal answer synthesis.
-CHAT_MODEL = "gpt-5.4-mini"
+# Use Sol for stronger interpretation of scope and conditions in legal answers.
+CHAT_MODEL = "gpt-6.1-sol"
 
 # Medium reasoning improves scope and applicability interpretation while
 # avoiding the higher latency and cost of high reasoning by default.

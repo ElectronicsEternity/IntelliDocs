@@ -8,6 +8,14 @@ from app.core.auth import AuthenticatedUser, get_current_user
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def disable_debug_capture_by_default(monkeypatch):
+    # Tests must not save fixture prompts alongside real user debug records.
+    # Dedicated capture tests opt in using pytest's private temporary folder.
+    from app.config import settings
+    monkeypatch.setattr(settings, "RAG_DEBUG_CAPTURE_ENABLED", False)
+
+
 def document_record(document_id: str, owner: str, status: str = "uploaded") -> dict:
     now = datetime.now(timezone.utc)
     return {

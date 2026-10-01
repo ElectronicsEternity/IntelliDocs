@@ -142,6 +142,44 @@ def test_exact_identifier_subtree_precedes_semantic_supplements():
     ]
 
 
+def test_fallback_preserves_complete_sections_in_multiple_documents():
+    # Exercise retrieval end to end with a saved-vector substitute: no API call.
+    class Embedder:
+        def generate_embedding(self, question):
+            return [0.1]
+
+    class Store:
+        def list_document_routing_candidates(self, **kwargs):
+            return [
+                {"document_id": doc, "document_title": doc, "filename": doc,
+                 "topics": [], "description_similarity": 0.0}
+                for doc in ["a", "b"]
+            ]
+
+        def search(self, **kwargs):
+            assert kwargs["top_k"] == 3
+            return []
+
+        def search_node_hierarchy(self, **kwargs):
+            return []
+
+        def search_exact_identifier(self, **kwargs):
+            assert kwargs["top_k"] is None
+            doc = kwargs["document_id"]
+            return [
+                {"chunk_id": f"{doc}-{i}", "document_id": doc,
+                 "text": f"Section child {i}", "similarity": 0.1}
+                for i in range(7)
+            ]
+
+    results = Retriever(Embedder(), Store()).retrieve("Section 6", "user-a", top_k=10)
+    assert len(results) == 14
+    assert [item["chunk_id"] for item in results] == [
+        f"{doc}-{i}" for doc in ["a", "b"] for i in range(7)
+    ]
+    assert Retriever._round_robin([[{"chunk_id": "extra"}]], 0) == []
+
+
 def test_answer_prompt_requires_structured_markdown():
     captured = {}
 
@@ -162,7 +200,7 @@ def test_answer_prompt_requires_structured_markdown():
     )
 
     prompt = captured["messages"][0]["content"]
-    assert captured["model"] == "gpt-5.4-mini"
+    assert captured["model"] == "gpt-6.1-sol"
     assert captured["reasoning_effort"] == "medium"
     assert "Format the answer as clean Markdown" in prompt
     assert "Put every bullet or numbered item on its own line" in prompt

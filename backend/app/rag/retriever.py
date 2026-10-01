@@ -83,7 +83,9 @@ class Retriever:
                 owner_id=owner_id,
                 query=question,
                 embedding=question_embedding,
-                top_k=candidate_limit,
+                # Exact references must retain every child, even when the
+                # document router uses its small semantic fallback allowance.
+                top_k=None,
                 document_id=document_id,
             )
             combined = self._combine_results(
@@ -96,12 +98,30 @@ class Retriever:
                 result["document_selection_score"] = document["combined_score"]
             per_document_results.append(combined)
 
-        # Interleave documents by their local result rank so one long document
-        # cannot consume the entire answer context before another likely one.
-        return self._round_robin(per_document_results, top_k)
+        # Preserve complete exact-reference bundles in document-score order.
+        # Different documents can share an identifier; their document labels
+        # remain attached so the answer model can distinguish the provisions.
+        anchors = []
+        supplements = []
+        for group in per_document_results:
+            anchors.extend(
+                result for result in group
+                if "exact_identifier" in result.get("match_types", [])
+            )
+            supplements.append([
+                result for result in group
+                if "exact_identifier" not in result.get("match_types", [])
+            ])
+        # top_k limits supplementary evidence, but must not split an explicit
+        # section. A complete bundle may therefore exceed the requested count.
+        remaining = max(0, top_k - len(anchors))
+        return anchors + self._round_robin(supplements, remaining)
 
     @staticmethod
     def _round_robin(result_groups: list[list[dict]], top_k: int) -> list[dict]:
+        # A full exact-reference bundle can leave no room for supplements.
+        if top_k <= 0:
+            return []
         results = []
         seen = set()
         max_length = max((len(group) for group in result_groups), default=0)
@@ -202,4 +222,6 @@ class Retriever:
             for result in ranked_results
             if result["chunk_id"] not in anchored_ids
         ]
-        return (anchored_results + supplementary_results)[:top_k]
+        # Do not truncate exact subtrees to the semantic-result allowance.
+        remaining = max(0, top_k - len(anchored_results))
+        return anchored_results + supplementary_results[:remaining]

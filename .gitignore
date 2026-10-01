@@ -43,4 +43,5 @@ frontend/.env.local
 backups/
 
 # Local runtime logs and generated review artifacts
+logs/
 output/

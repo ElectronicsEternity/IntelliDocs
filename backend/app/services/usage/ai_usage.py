@@ -11,6 +11,12 @@ logger = logging.getLogger(__name__)
 _context: ContextVar[dict] = ContextVar("ai_usage_context", default={})
 
 
+def get_ai_usage_context() -> dict:
+    # Return a copy so diagnostics can correlate requests without mutating
+    # the authenticated user/conversation context used by cost tracking.
+    return _context.get().copy()
+
+
 @contextmanager
 def ai_usage_context(**values):
     token = _context.set({**_context.get(), **values})
@@ -25,7 +31,10 @@ def _get(value, key, default=None):
 
 
 def _rates(model: str):
-    if model == "gpt-5.6-sol" or model.startswith("gpt-5.6-sol-"):
+    # Accept dated response model names as well as the configured alias.
+    if model == "gpt-6.1-sol" or model.startswith("gpt-6.1-sol-"):
+        values = (settings.AI_GPT61_SOL_INPUT_RATE, settings.AI_GPT61_SOL_CACHED_INPUT_RATE, settings.AI_GPT61_SOL_OUTPUT_RATE)
+    elif model == "gpt-5.6-sol" or model.startswith("gpt-5.6-sol-"):
         values = (settings.AI_GPT56_SOL_INPUT_RATE, settings.AI_GPT56_SOL_CACHED_INPUT_RATE, settings.AI_GPT56_SOL_OUTPUT_RATE)
     elif model == "gpt-5.6-terra" or model.startswith("gpt-5.6-terra-"):
         values = (settings.AI_GPT56_TERRA_INPUT_RATE, settings.AI_GPT56_TERRA_CACHED_INPUT_RATE, settings.AI_GPT56_TERRA_OUTPUT_RATE)
@@ -59,9 +68,9 @@ def build_record(response, *, activity, model, user_id, document_id=None, conver
     rates = _rates(reported_model)
     cost = None
     if rates is not None and input_tokens is not None and output_tokens is not None:
-        if input_tokens > settings.AI_LONG_CONTEXT_TOKEN_THRESHOLD and reported_model.startswith("gpt-5.6-"):
-            # GPT-5.6 long-context requests use 2x input/cached input and
-            # 1.5x output rates above the documented threshold.
+        if input_tokens > settings.AI_LONG_CONTEXT_TOKEN_THRESHOLD and reported_model.startswith(("gpt-5.6-", "gpt-6.1-sol")):
+            # Both families charge 2x input/cached input and 1.5x output
+            # for the entire request above the long-context threshold.
             rates = (rates[0] * 2, rates[1] * 2, rates[2] * Decimal("1.5"))
         # Cached input is a subset of input; reasoning is already in output.
         cost = (Decimal(input_tokens - cached) * rates[0] + Decimal(cached) * rates[1] + Decimal(output_tokens) * rates[2]) / Decimal(1_000_000)

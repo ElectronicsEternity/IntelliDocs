@@ -30,6 +30,26 @@ def test_gpt54_mini_cost_uses_current_model_rates():
     assert row["estimated_cost_usd"] == Decimal("0.015")
 
 
+@pytest.mark.parametrize("model", ["gpt-6.1-sol", "gpt-6.1-sol-2026-09-29"])
+def test_gpt61_sol_cost_includes_cache_and_reasoning_without_double_counting(model):
+    row = build_record(
+        response(model, prompt_tokens=8000, completion_tokens=2000,
+                 prompt_tokens_details=NS(cached_tokens=1000),
+                 completion_tokens_details=NS(reasoning_tokens=500)),
+        activity="chat", model="gpt-6.1-sol", user_id="user-a",
+    )
+    assert row["estimated_cost_usd"] == Decimal("0.0341")
+    assert row["reasoning_tokens"] == 500
+
+
+def test_gpt61_sol_long_context_cost_uses_full_request_multiplier():
+    row = build_record(
+        response("gpt-6.1-sol", input_tokens=300000, output_tokens=2000),
+        activity="chat", model="gpt-6.1-sol", user_id="user-a",
+    )
+    assert row["estimated_cost_usd"] == Decimal("1.23")
+
+
 def test_profiling_and_embedding_costs():
     profile = build_record(
         response("gpt-5", input_tokens=60000, output_tokens=10000),

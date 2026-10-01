@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     AI_GPT54_MINI_INPUT_RATE: float = 0.75
     AI_GPT54_MINI_CACHED_INPUT_RATE: float = 0.075
     AI_GPT54_MINI_OUTPUT_RATE: float = 4.5
+    # GPT-6.1 Sol Standard rates; retain prior model rates for historical usage.
+    AI_GPT61_SOL_INPUT_RATE: float = 2.0
+    AI_GPT61_SOL_CACHED_INPUT_RATE: float = 0.10
+    AI_GPT61_SOL_OUTPUT_RATE: float = 10.0
     AI_GPT56_SOL_INPUT_RATE: float = 4.0
     AI_GPT56_SOL_CACHED_INPUT_RATE: float = 0.4
     AI_GPT56_SOL_OUTPUT_RATE: float = 20.0
@@ -72,10 +76,16 @@ class Settings(BaseSettings):
     DOCUMENT_TITLE_FILENAME_WEIGHT: float = 0.50
     DOCUMENT_DESCRIPTION_WEIGHT: float = 0.35
     DOCUMENT_HIERARCHY_TITLE_WEIGHT: float = 0.15
+    # Weak overlap with generic words such as "minimum" is not a document name.
+    DOCUMENT_NAME_MATCH_MIN_SCORE: float = 0.60
     DOCUMENT_ROUTING_MIN_SCORE: float = 0.40
     DOCUMENT_ROUTING_MAX_DOCUMENTS: int = 3
     DOCUMENT_FALLBACK_CHUNKS_PER_DOCUMENT: int = 3
     RAG_TOP_K: int = 10
+    # Capture exact answer requests during local testing; disable for production
+    # until private storage and automatic retention are configured.
+    RAG_DEBUG_CAPTURE_ENABLED: bool = True
+    RAG_DEBUG_CAPTURE_DIRECTORY: Path = Path(__file__).resolve().parents[2] / "logs" / "rag_debug"
     FRONTEND_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property

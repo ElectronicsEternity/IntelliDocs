@@ -401,9 +401,11 @@ class PostgresVectorStore:
         owner_id: str,
         query: str,
         embedding,
-        top_k: int = TOP_K,
+        top_k: int | None = TOP_K,
         document_id: str | None = None,
     ) -> list[dict]:
+        # PostgreSQL LIMIT NULL returns the whole matched subtree. Retrieval
+        # uses this mode to keep later applicability clauses in the context.
         cursor = self.connection.cursor()
         cursor.execute(
             """

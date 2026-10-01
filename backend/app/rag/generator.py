@@ -7,6 +7,11 @@ from openai import OpenAI
 from app.config import settings
 from app.constants import CHAT_MODEL, CHAT_REASONING_EFFORT
 from app.services.usage.ai_usage import tracked_ai_call
+from app.rag.debug_capture import AnswerDebugCapture
+
+
+# Bump when answer instructions change so saved requests remain comparable.
+ANSWER_PROMPT_VERSION = "applicability-scope-v1"
 
 
 class Generator:
@@ -162,31 +167,33 @@ Answer:
 
         # Generate answer
         self.last_usage = {}
-        response = tracked_ai_call(
-            lambda: self.client.chat.completions.create(
-                model=CHAT_MODEL,
-                reasoning_effort=CHAT_REASONING_EFFORT,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
-            ),
-            activity="chat", model=CHAT_MODEL,
+        # Save the same request dictionary passed to OpenAI, including the
+        # fully assembled instructions, question and dynamic chunk text.
+        request = {
+            "model": CHAT_MODEL,
+            "reasoning_effort": CHAT_REASONING_EFFORT,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        capture = AnswerDebugCapture(
+            question=question, chunks=chunks, request=request,
+            prompt_version=ANSWER_PROMPT_VERSION,
         )
-
-        if response.usage is not None:
-            self.last_usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-            }
-
-        content = (response.choices[0].message.content)
-
-        if content is None:
-            raise ValueError(
-                "OpenAI returned empty content."
+        response = None
+        try:
+            response = tracked_ai_call(
+                lambda: self.client.chat.completions.create(**request),
+                activity="chat", model=CHAT_MODEL,
             )
-
+            if response.usage is not None:
+                self.last_usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                }
+            content = response.choices[0].message.content
+            if content is None:
+                raise ValueError("OpenAI returned empty content.")
+        except Exception as exc:
+            capture.finish(response=response, error=exc)
+            raise
+        capture.finish(response=response, answer=content)
         return content

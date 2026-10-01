@@ -6,7 +6,8 @@ import re
 from app.config import settings
 
 
-LOGGER = logging.getLogger(__name__)
+# Use the backend's configured handler so routing scores appear in its log.
+LOGGER = logging.getLogger("uvicorn.error.document_router")
 WORD_PATTERN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "does", "for",
@@ -111,11 +112,21 @@ class DocumentRouter:
             0.0,
             float(candidate.get("description_similarity") or 0.0),
         )
-        combined = (
-            settings.DOCUMENT_TITLE_FILENAME_WEIGHT * name_match
-            + settings.DOCUMENT_DESCRIPTION_WEIGHT * description_similarity
-            + settings.DOCUMENT_HIERARCHY_TITLE_WEIGHT * hierarchy_score
+        # Apply name weight only when the question meaningfully names this
+        # document. Otherwise normalize the description/topic weights so an
+        # unnamed document is not penalized for the absent name signal.
+        uses_name = exact_name_match or (
+            name_match >= settings.DOCUMENT_NAME_MATCH_MIN_SCORE
         )
+        name_weight = settings.DOCUMENT_TITLE_FILENAME_WEIGHT if uses_name else 0.0
+        description_weight = settings.DOCUMENT_DESCRIPTION_WEIGHT
+        hierarchy_weight = settings.DOCUMENT_HIERARCHY_TITLE_WEIGHT
+        total_weight = name_weight + description_weight + hierarchy_weight
+        combined = (
+            name_weight * name_match
+            + description_weight * description_similarity
+            + hierarchy_weight * hierarchy_score
+        ) / total_weight if total_weight > 0 else 0.0
         return {
             "document_id": str(candidate["document_id"]),
             "document_title": candidate.get("document_title"),
@@ -126,6 +137,7 @@ class DocumentRouter:
             "matching_hierarchy_titles": matched_titles,
             "combined_score": round(combined, 6),
             "exact_name_match": exact_name_match,
+            "uses_name_weight": uses_name,
         }
 
     @staticmethod
