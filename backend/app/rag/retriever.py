@@ -52,7 +52,7 @@ class Retriever:
         with ai_usage_context(user_id=owner_id, embedding_activity="query_embedding"):
             question_embedding = self.embedder.generate_embedding(question)
 
-        selected_documents, broad_fallback = self.document_router.select(
+        selected_documents, _broad_fallback = self.document_router.select(
             question=question,
             owner_id=owner_id,
             embedding=question_embedding,
@@ -63,10 +63,10 @@ class Retriever:
         per_document_results = []
         for document in selected_documents:
             document_id = document["document_id"]
-            candidate_limit = (
-                settings.DOCUMENT_FALLBACK_CHUNKS_PER_DOCUMENT
-                if broad_fallback else settings.RAG_DOCUMENT_TOP_K
-            )
+            # Each document may fill the entire shared allowance. The final
+            # cross-document selection below enforces the total, so neither a
+            # local ten-result cap nor fallback's three-result cap hides evidence.
+            candidate_limit = top_k
             # Resolve exact sections first so semantic candidate slots are not
             # spent on chunks already guaranteed to be in the complete bundle.
             identifier_results = self.vector_store.search_exact_identifier(

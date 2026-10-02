@@ -158,7 +158,7 @@ def test_fallback_preserves_complete_sections_in_multiple_documents():
             ]
 
         def search(self, **kwargs):
-            assert kwargs["top_k"] == 3
+            assert kwargs["top_k"] == 10
             return []
 
         def search_node_hierarchy(self, **kwargs):
@@ -179,6 +179,47 @@ def test_fallback_preserves_complete_sections_in_multiple_documents():
         f"{doc}-{i}" for doc in ["a", "b"] for i in range(7)
     ]
     assert Retriever._round_robin([[{"chunk_id": "extra"}]], 0) == []
+
+
+@pytest.mark.parametrize("sizes,fallback,expected", [
+    ([30], False, [20]),
+    ([30], True, [20]),
+    ([30, 3], False, [17, 3]),
+    ([30, 30], False, [10, 10]),
+])
+def test_documents_share_one_allowance(sizes, fallback, expected):
+    # Fake embeddings and stores test selection without any paid API request.
+    class Embedder:
+        def generate_embedding(self, question):
+            return [0.1]
+
+    class Store:
+        def search_exact_identifier(self, **kwargs):
+            return []
+
+        def search(self, **kwargs):
+            assert kwargs["top_k"] == 20
+            doc = kwargs["document_id"]
+            return [
+                {"chunk_id": f"{doc}-{i}", "document_id": doc,
+                 "text": str(i), "similarity": 0.9}
+                for i in range(min(sizes[int(doc)], kwargs["top_k"]))
+            ]
+
+        def search_node_hierarchy(self, **kwargs):
+            assert kwargs["top_k"] == 20
+            return []
+
+    retriever = Retriever(Embedder(), Store())
+    retriever.document_router = SimpleNamespace(select=lambda **kwargs: (
+        [{"document_id": str(i), "combined_score": 0.9}
+         for i in range(len(sizes))], fallback,
+    ))
+    results = retriever.retrieve("rates", "user-a", top_k=20)
+    assert len(results) == 20
+    assert len({item["chunk_id"] for item in results}) == 20
+    assert [sum(item["document_id"] == str(i) for item in results)
+            for i in range(len(sizes))] == expected
 
 
 def test_section_children_consume_one_local_selection_slot():
