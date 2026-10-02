@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -29,3 +29,6 @@ class DocumentNode:
     end_page: int | None = None
 
     created_at: datetime | None = None
+
+    # Keep the printed same-document references with their source node.
+    references: list[dict] = field(default_factory=list)

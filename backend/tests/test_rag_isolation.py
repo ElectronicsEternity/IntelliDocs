@@ -97,11 +97,11 @@ def test_retriever_scopes_every_search_path_to_owner():
                 "description_similarity": 0.9,
             }]
 
-        def search(self, *, owner_id, embedding, top_k, document_id):
+        def search(self, *, owner_id, embedding, top_k, document_id, excluded_chunk_ids):
             owners.append(owner_id)
             return []
 
-        def search_node_hierarchy(self, *, owner_id, embedding, top_k, document_id):
+        def search_node_hierarchy(self, *, owner_id, embedding, top_k, document_id, excluded_chunk_ids):
             owners.append(owner_id)
             return []
 
@@ -196,6 +196,63 @@ def test_section_children_consume_one_local_selection_slot():
     result = retriever._combine_results(semantic, [], exact, top_k=10)
     assert len(result) == 15
     assert [item["chunk_id"] for item in result[6:]] == [f"extra-{i}" for i in range(9)]
+
+
+def test_exact_bundle_is_resolved_before_both_semantic_searches():
+    calls = []
+
+    class Embedder:
+        def generate_embedding(self, question):
+            return [0.1]
+
+    class Store:
+        def list_document_routing_candidates(self, **kwargs):
+            return [{"document_id": "a", "document_title": "a", "filename": "a",
+                     "topics": [], "description_similarity": 0.9}]
+
+        def search_exact_identifier(self, **kwargs):
+            calls.append("exact")
+            return [{"chunk_id": chunk_id, "document_id": "a", "text": chunk_id,
+                     "exact_anchor_id": "root", "similarity": 0.5}
+                    for chunk_id in ["root", "child", "child"]]
+
+        def search(self, **kwargs):
+            calls.append("chunk_vector")
+            assert kwargs["excluded_chunk_ids"] == ["root", "child"]
+            return [{"chunk_id": "additional", "document_id": "a",
+                     "text": "additional", "similarity": 0.8}]
+
+        def search_node_hierarchy(self, **kwargs):
+            calls.append("node_vector")
+            assert kwargs["excluded_chunk_ids"] == ["root", "child"]
+            return []
+
+    results = Retriever(Embedder(), Store()).retrieve("Section 6", "user-a")
+    assert calls == ["exact", "chunk_vector", "node_vector"]
+    assert [item["chunk_id"] for item in results] == ["root", "child", "additional"]
+
+
+@pytest.mark.parametrize("method", ["search", "search_node_hierarchy"])
+def test_sql_excludes_exact_chunks_before_search_limits(method):
+    from app.storage.postgres_vector_store import PostgresVectorStore
+
+    class Probe:
+        def cursor(self): return self
+        def execute(self, statement, parameters):
+            self.statement, self.parameters = statement, parameters
+        def fetchall(self): return []
+        def close(self): pass
+
+    probe = Probe()
+    store = PostgresVectorStore.__new__(PostgresVectorStore)
+    store.connection = probe
+    excluded = ["00000000-0000-0000-0000-000000000001"]
+    getattr(store, method)(owner_id="owner", embedding=[0.1], top_k=10,
+                          document_id=None, excluded_chunk_ids=excluded)
+    assert probe.statement.count("%s") == len(probe.parameters)
+    assert "d.user_id = %s" in probe.statement
+    assert probe.statement.index("ANY(%s::uuid[])") < probe.statement.index("LIMIT %s")
+    assert probe.parameters.count(excluded) == (2 if method == "search_node_hierarchy" else 1)
 
 
 def test_distinct_section_roots_consume_distinct_slots():

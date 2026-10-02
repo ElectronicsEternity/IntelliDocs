@@ -260,6 +260,7 @@ class PostgresVectorStore:
         embedding,
         top_k: int = TOP_K,
         document_id: str | None = None,
+        excluded_chunk_ids: list[str] | None = None,
     ) -> list[dict]:
         cursor = self.connection.cursor()
         cursor.execute(
@@ -278,6 +279,9 @@ class PostgresVectorStore:
             LEFT JOIN document_nodes n ON n.id = c.node_id
             WHERE d.user_id = %s
             AND (%s::uuid IS NULL OR d.id = %s::uuid)
+            -- An empty UUID array excludes nothing. Filter before LIMIT so
+            -- exact-section chunks do not consume supplementary search slots.
+            AND NOT (c.id = ANY(%s::uuid[]))
             AND 1 - (e.embedding <=> %s::vector) >= %s
             ORDER BY similarity DESC
             LIMIT %s
@@ -287,6 +291,7 @@ class PostgresVectorStore:
                 owner_id,
                 document_id,
                 document_id,
+                excluded_chunk_ids or [],
                 embedding,
                 SIMILARITY_THRESHOLD,
                 top_k,
@@ -303,6 +308,7 @@ class PostgresVectorStore:
         embedding,
         top_k: int = TOP_K,
         document_id: str | None = None,
+        excluded_chunk_ids: list[str] | None = None,
     ) -> list[dict]:
         cursor = self.connection.cursor()
         cursor.execute(
@@ -319,6 +325,13 @@ class PostgresVectorStore:
                 WHERE d.user_id = %s
                 AND (%s::uuid IS NULL OR d.id = %s::uuid)
                 AND ne.embedding_version = %s
+                -- Skip nodes whose own chunks already belong to an exact
+                -- bundle before selecting the semantic node shortlist.
+                AND NOT EXISTS (
+                    SELECT 1 FROM chunks excluded
+                    WHERE excluded.node_id = n.id
+                      AND excluded.id = ANY(%s::uuid[])
+                )
                 AND 1 - (
                     ne.embedding <=> %s::vector
                 ) >= %s
@@ -361,6 +374,9 @@ class PostgresVectorStore:
             LEFT JOIN document_nodes n ON n.id = c.node_id
             WHERE d.user_id = %s
             AND (%s::uuid IS NULL OR d.id = %s::uuid)
+            -- Ancestors can still expand into exact-section descendants;
+            -- exclude those chunks again before the final result limit.
+            AND NOT (c.id = ANY(%s::uuid[]))
             AND 1 - (e.embedding <=> %s::vector) >= %s
             ORDER BY rn.node_similarity DESC, similarity DESC
             LIMIT %s
@@ -371,6 +387,7 @@ class PostgresVectorStore:
                 document_id,
                 document_id,
                 CURRENT_EMBEDDING_VERSION,
+                excluded_chunk_ids or [],
                 embedding,
                 SIMILARITY_THRESHOLD,
                 top_k,
@@ -378,6 +395,7 @@ class PostgresVectorStore:
                 owner_id,
                 document_id,
                 document_id,
+                excluded_chunk_ids or [],
                 embedding,
                 SIMILARITY_THRESHOLD,
                 top_k,
@@ -564,6 +582,46 @@ class PostgresVectorStore:
             item["exact_anchor_id"] = str(row[12])
             results.append(item)
         return results
+
+    # Convert a retrieval row into named values.
+    def expand_references(self, *, owner_id: str, chunks: list[dict]) -> list[dict]:
+        from app.rag.reference_graph import ReferenceGraph
+
+        # Every query is scoped to the selected document AND its owner. Stored
+        # references have no document field, so cross-document links are impossible.
+        results = {chunk["chunk_id"]: chunk.copy() for chunk in chunks}
+        for document_id in dict.fromkeys(chunk["document_id"] for chunk in chunks):
+            with self.connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT n.id, n.parent_id, n.node_type, n.identifier, n.hierarchy_references
+                    FROM document_nodes n JOIN documents d ON d.id = n.document_id
+                    WHERE d.id = %s AND d.user_id = %s
+                """, (document_id, owner_id))
+                nodes = [{"id": str(row[0]), "parent_id": str(row[1]) if row[1] else None,
+                          "node_type": row[2], "identifier": row[3], "references": row[4]}
+                         for row in cursor.fetchall()]
+                seeds = [chunk.get("node_id") for chunk in chunks if chunk["document_id"] == document_id]
+                linked, unresolved = ReferenceGraph(nodes).linked_nodes(seeds)
+                for chunk in results.values():
+                    if chunk["document_id"] == document_id:
+                        chunk["unresolved_references"] = unresolved
+                if not linked:
+                    continue
+                cursor.execute("""
+                    SELECT c.id, c.document_id, c.node_id, c.content_type, c.text, c.metadata,
+                           COALESCE(d.title, d.filename), d.filename, n.node_type,
+                           n.identifier, n.title, 0.0
+                    FROM chunks c JOIN documents d ON d.id = c.document_id
+                    JOIN document_nodes n ON n.id = c.node_id
+                    WHERE d.id = %s AND d.user_id = %s AND n.id = ANY(%s::uuid[])
+                    ORDER BY c.chunk_number, c.id
+                """, (document_id, owner_id, list(linked)))
+                for row in cursor.fetchall():
+                    item = self._map_search_row(row)
+                    chunk = results.setdefault(item["chunk_id"], item)
+                    chunk.setdefault("match_types", []).append("reference_following")
+                    chunk["reference_links"] = linked[item["node_id"]]
+        return list(results.values())
 
     # Convert a retrieval row into named values.
     def _map_search_row(self, row: tuple) -> dict:

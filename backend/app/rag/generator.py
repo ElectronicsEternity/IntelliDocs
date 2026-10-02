@@ -11,7 +11,7 @@ from app.rag.debug_capture import AnswerDebugCapture
 
 
 # Bump when answer instructions change so saved requests remain comparable.
-ANSWER_PROMPT_VERSION = "applicability-scope-v1"
+ANSWER_PROMPT_VERSION = "applicability-scope-references-v2"
 
 
 class Generator:
@@ -79,6 +79,15 @@ class Generator:
                 )
 
             # Add the complete retrieved chunk text last.
+            # State why linked evidence was included, without claiming the link
+            # itself proves a legal effect. The actual provision text controls.
+            for link in chunk.get("reference_links", []):
+                reference = link["reference"]
+                target = reference["identifier"] + (reference["sub_identifier"] or "")
+                context_lines.append(
+                    f"Printed reference connection ({link['direction']}): "
+                    f"{reference['node_type']} {target} within this document."
+                )
             context_lines.append(f"Text: {chunk['text']}")
             context_parts.append(
                 "\n".join(context_lines)

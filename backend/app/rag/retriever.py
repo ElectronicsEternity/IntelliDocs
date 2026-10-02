@@ -67,28 +67,33 @@ class Retriever:
                 settings.DOCUMENT_FALLBACK_CHUNKS_PER_DOCUMENT
                 if broad_fallback else settings.RAG_DOCUMENT_TOP_K
             )
-            # Keep the established three retrieval paths unchanged, but run
-            # them independently inside each selected document.
+            # Resolve exact sections first so semantic candidate slots are not
+            # spent on chunks already guaranteed to be in the complete bundle.
+            identifier_results = self.vector_store.search_exact_identifier(
+                owner_id=owner_id,
+                query=question,
+                embedding=question_embedding,
+                top_k=None,
+                document_id=document_id,
+            )
+            excluded_chunk_ids = list(dict.fromkeys(
+                result["chunk_id"] for result in identifier_results
+            ))
+            # Pass the same exclusion set to both semantic paths. Filtering in
+            # SQL before LIMIT lets lower-ranked eligible chunks fill the slots.
             vector_results = self.vector_store.search(
                 owner_id=owner_id,
                 embedding=question_embedding,
                 top_k=candidate_limit,
                 document_id=document_id,
+                excluded_chunk_ids=excluded_chunk_ids,
             )
             node_results = self.vector_store.search_node_hierarchy(
                 owner_id=owner_id,
                 embedding=question_embedding,
                 top_k=candidate_limit,
                 document_id=document_id,
-            )
-            identifier_results = self.vector_store.search_exact_identifier(
-                owner_id=owner_id,
-                query=question,
-                embedding=question_embedding,
-                # Exact references must retain every child, even when the
-                # document router uses its small semantic fallback allowance.
-                top_k=None,
-                document_id=document_id,
+                excluded_chunk_ids=excluded_chunk_ids,
             )
             combined = self._combine_results(
                 vector_results,
@@ -128,7 +133,12 @@ class Retriever:
         unique_chunks = {}
         for chunk in selected_chunks:
             unique_chunks.setdefault(chunk["chunk_id"], chunk)
-        return list(unique_chunks.values())
+        selected = list(unique_chunks.values())
+        # Add direct forward/reverse links only AFTER ranking. Linked evidence
+        # bypasses similarity cutoffs and is not truncated by supplementary slots.
+        # Older test adapters without this method keep their original behavior.
+        expand = getattr(self.vector_store, "expand_references", None)
+        return expand(owner_id=owner_id, chunks=selected) if expand else selected
 
     @staticmethod
     def _round_robin(result_groups: list[list[dict]], top_k: int) -> list[dict]:

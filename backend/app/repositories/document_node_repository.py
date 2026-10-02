@@ -1,4 +1,5 @@
 from typing import List
+import json
 
 from app.models.document_node import DocumentNode
 
@@ -30,9 +31,10 @@ class DocumentNodeRepository:
             depth,
             start_page,
             start_character,
-            end_page
+            end_page,
+            hierarchy_references
         )
-        SELECT %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+        SELECT %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb
         WHERE EXISTS (
             SELECT 1 FROM documents WHERE id = %s AND user_id = %s
         )
@@ -52,6 +54,7 @@ class DocumentNodeRepository:
                 node.start_page,
                 node.start_character,
                 node.end_page,
+                json.dumps(node.references),
                 node.document_id,
                 self._owner(),
             ),
@@ -73,9 +76,10 @@ class DocumentNodeRepository:
             depth,
             start_page,
             start_character,
-            end_page
+            end_page,
+            hierarchy_references
         )
-        SELECT %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+        SELECT %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb
         WHERE EXISTS (
             SELECT 1 FROM documents WHERE id = %s AND user_id = %s
         )
@@ -94,6 +98,7 @@ class DocumentNodeRepository:
                 n.start_page,
                 n.start_character,
                 n.end_page,
+                json.dumps(n.references),
                 n.document_id,
                 self._owner(),
             )
@@ -152,7 +157,8 @@ class DocumentNodeRepository:
             n.depth,
             n.start_page,
             n.start_character,
-            n.end_page
+            n.end_page,
+            n.hierarchy_references
         FROM document_nodes n
         JOIN documents d ON d.id = n.document_id
         WHERE n.document_id = %s AND d.user_id = %s
@@ -180,7 +186,8 @@ class DocumentNodeRepository:
                     depth=row[7],
                     start_page=row[8],
                     start_character=row[9],
-                    end_page=row[10]
+                    end_page=row[10],
+                    references=row[11] if len(row) > 11 else [],
                 )
             )
 
@@ -214,7 +221,8 @@ class DocumentNodeRepository:
             depth = %s,
             start_page = %s,
             start_character = %s,
-            end_page = %s
+            end_page = %s,
+            hierarchy_references = %s::jsonb
         WHERE id = %s AND EXISTS (
             SELECT 1 FROM documents d
             WHERE d.id = document_nodes.document_id AND d.user_id = %s
@@ -233,6 +241,7 @@ class DocumentNodeRepository:
                 node.start_page,
                 node.start_character,
                 node.end_page,
+                json.dumps(node.references),
                 node.id,
                 self._owner(),
             ),

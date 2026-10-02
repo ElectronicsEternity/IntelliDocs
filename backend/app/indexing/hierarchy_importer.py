@@ -122,6 +122,7 @@ class HierarchyImporter:
             title=node.get("title",""),
             sequence_no=sequence_no,
             depth=depth,
+            references=[reference.copy() for reference in node.get("references", [])],
             start_page=None,
             end_page=None
         )

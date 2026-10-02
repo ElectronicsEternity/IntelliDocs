@@ -371,6 +371,30 @@ class DocumentProfileValidator:
         if not isinstance(title, str):
             errors.append(f"{path}.title must be text.")
 
+        # Older saved hierarchies may lack references. When present, validate
+        # their contract without guessing whether an absent target exists.
+        if "references" in node:
+            references = node["references"]
+            if not isinstance(references, list):
+                errors.append(f"{path}.references must be an array.")
+            else:
+                for index, reference in enumerate(references):
+                    location = f"{path}.references[{index}]"
+                    if not isinstance(reference, dict) or set(reference) != {
+                        "node_type", "identifier", "sub_identifier"
+                    }:
+                        errors.append(f"{location} must contain exactly node_type, identifier and sub_identifier.")
+                        continue
+                    if not isinstance(reference["node_type"], str) or reference["node_type"] not in ALLOWED_NODE_TYPES:
+                        errors.append(f"{location}.node_type is invalid.")
+                    if not isinstance(reference["identifier"], str) or not reference["identifier"].strip():
+                        errors.append(f"{location}.identifier must be nonempty text.")
+                    child_identifier = reference["sub_identifier"]
+                    if child_identifier is not None and (
+                        not isinstance(child_identifier, str) or not child_identifier.strip()
+                    ):
+                        errors.append(f"{location}.sub_identifier must be nonempty text or null.")
+
         # Non-table nodes need text for later page mapping.
         if (
             not is_root

@@ -24,7 +24,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from app.config import settings
-from app.indexing.hierarchy_prompt_rules import OPENING_TEXT_RULES
+from app.indexing.hierarchy_prompt_rules import OPENING_TEXT_RULES, REFERENCE_RULES
 from app.services.usage.ai_usage import tracked_ai_call
 from app.indexing.document_profile_validator import (
     DocumentProfileValidationError,
@@ -714,6 +714,7 @@ Every node MUST contain:
 - identifier
 - title
 - opening_text
+- references
 - start_page
 - children
 
@@ -756,6 +757,8 @@ DOCUMENT LANGUAGE
 
 {OPENING_TEXT_RULES}
 
+{REFERENCE_RULES}
+
 The document language has already been detected
 by the application.
 
@@ -794,6 +797,7 @@ Root node must always be:
   "title": "",
   "document_description": "A factual 250-350 word description of this document.",
   "opening_text": null,
+  "references": [],
   "start_page": 1,
   "page_coverage": [
     {{"page_label": 1, "classification": "new_nodes_start_here"}}
