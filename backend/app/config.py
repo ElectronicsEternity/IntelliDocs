@@ -30,6 +30,19 @@ class Settings(BaseSettings):
     PRO_MAX_STORAGE_BYTES: int = 2 * 1024 * 1024 * 1024
     PRO_MAX_PAGES_PER_MONTH: int = 5000
     PRO_AI_BUDGET_USD: float = 20.0
+    # Paid Stripe periods snapshot these values so later exchange-rate/config
+    # changes cannot alter an allowance which a user has already purchased.
+    PRO_AI_ALLOWANCE_MYR: float = 25.0
+    BILLING_USD_TO_MYR: float = 4.09
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PRICE_ID: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_EXPECTED_PRICE_MYR: float = 50.0
+    STRIPE_RETURN_URL: str = "http://127.0.0.1:5173/"
+    # Sandbox only until a separate live-payment readiness review is complete.
+    STRIPE_SANDBOX_ONLY: bool = True
+    # Enable only after FPX is activated in the same Stripe sandbox.
+    STRIPE_FPX_ENABLED: bool = False
     PROCESSING_STALE_AFTER_SECONDS: int = 60 * 60
     # Use the stronger reasoning model selected for production hierarchy retrieval.
     HIERARCHY_PROFILE_MODEL: str = "gpt-5.6-sol"

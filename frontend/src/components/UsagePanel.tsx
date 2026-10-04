@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 
 import type { IntelliDocsApi } from '../lib/api'
-import type { UsageMetric, UsageSummary } from '../types/api'
+import type { BillingStatus, UsageMetric, UsageSummary } from '../types/api'
+import { BillingPanel } from './BillingPanel'
 
 type Props = { api: IntelliDocsApi }
 
@@ -35,6 +36,7 @@ function UsageCard({ label, metric, format = String, monthly = false }: {
 
 export function UsagePanel({ api }: Props) {
   const [usage, setUsage] = useState<UsageSummary | null>(null)
+  const [billing, setBilling] = useState<BillingStatus | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -48,7 +50,15 @@ export function UsagePanel({ api }: Props) {
   if (error) return <p className="notice notice-error">{error}</p>
   if (!usage) return <div className="inline-loader"><div className="loader" /><p>Loading account usage…</p></div>
 
-  const resetDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(usage.period_end))
+  const resetDate = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(usage.period_end))
+  // Only promise a reset for a confirmed active, renewing subscription.
+  const periodMessage = usage.plan_code === 'trial'
+    ? `Your trial ends on ${resetDate}.`
+    : billing?.cancel_at_period_end || billing?.access_type === 'fpx'
+      ? `Your Pro access ends on ${resetDate}.`
+      : billing?.subscription_status === 'active'
+        ? `Your current allowance resets on ${resetDate}.`
+        : `Your current usage period ends on ${resetDate}.`
   return (
     <section aria-labelledby="usage-heading">
       <div className="section-heading usage-heading">
@@ -65,9 +75,9 @@ export function UsagePanel({ api }: Props) {
         <UsageCard label="Pages processed" metric={usage.pages_processed} monthly />
       </div>
       <div className="plan-note">
-        <div><strong>{usage.plan_name} plan</strong><p>Your current usage period ends on {resetDate}. Questions use the same overall allowance rather than a separate question limit.</p></div>
-        {usage.plan_code === 'trial' && <span>Pro upgrades and payments are coming in a later change set.</span>}
+        <div><strong>{usage.plan_name} plan</strong><p>{periodMessage}</p></div>
       </div>
+      <BillingPanel api={api} onStatus={setBilling} />
     </section>
   )
 }

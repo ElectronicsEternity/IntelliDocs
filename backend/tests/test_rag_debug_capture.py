@@ -57,6 +57,9 @@ def test_exact_request_is_saved_before_call_and_completed_with_usage(capture_fol
     path, saved = read_capture(capture_folder)
     assert saved["request"] == supplied
     assert saved["chunks"] == chunks
+    assert saved["context_compaction"]["evidence_count"] == len(chunks)
+    assert saved["context_compaction"]["reused_bodies"] == 0
+    assert len(saved["context_compaction"]["evidence_mapping"]) == len(chunks)
     assert saved["status"] == "completed"
     assert saved["user_id"] == "user-a"
     assert saved["conversation_id"] == "conversation-a"

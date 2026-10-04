@@ -42,6 +42,19 @@ export interface UsageMetric {
   limit: number
 }
 
+export interface BillingStatus {
+  enabled: boolean
+  fpx_enabled?: boolean
+  payment_review?: boolean
+  sandbox: boolean
+  monthly_price_myr: number
+  subscription_status: string
+  access_type?: 'subscription' | 'fpx'
+  cancel_at_period_end: boolean
+  period_end?: string | null
+  has_customer: boolean
+}
+
 export interface UsageSummary {
   plan_code: 'trial' | 'pro'
   plan_name: string

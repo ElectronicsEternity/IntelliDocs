@@ -1,4 +1,4 @@
-import type { ChatResponse, DocumentRecord, UsageSummary } from '../types/api'
+import type { BillingStatus, ChatResponse, DocumentRecord, UsageSummary } from '../types/api'
 
 interface ErrorPayload {
   detail?: string
@@ -61,6 +61,22 @@ export class IntelliDocsApi {
 
   getUsage(): Promise<UsageSummary> {
     return this.request('/usage')
+  }
+
+  getBilling(): Promise<BillingStatus> {
+    return this.request('/billing/status')
+  }
+
+  startCheckout(): Promise<{ url: string }> {
+    return this.request('/billing/checkout', { method: 'POST' })
+  }
+
+  startFpxCheckout(): Promise<{ url: string }> {
+    return this.request('/billing/checkout/fpx', { method: 'POST' })
+  }
+
+  manageSubscription(): Promise<{ url: string }> {
+    return this.request('/billing/portal', { method: 'POST' })
   }
 
   private notifyUsageChanged() {

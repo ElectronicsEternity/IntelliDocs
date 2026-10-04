@@ -12,7 +12,9 @@ type View = 'documents' | 'chat' | 'usage'
 
 export function DashboardPage() {
   const { session, signOut } = useAuth()
-  const [view, setView] = useState<View>('documents')
+  // Show subscription status after Stripe returns without granting access from
+  // a browser URL; verified payment notifications remain the authority.
+  const [view, setView] = useState<View>(() => new URLSearchParams(window.location.search).has('billing') ? 'usage' : 'documents')
   const [signingOut, setSigningOut] = useState(false)
   const api = useMemo(
     () => new IntelliDocsApi(async (forceRefresh = false) => {

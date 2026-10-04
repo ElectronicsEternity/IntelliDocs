@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -44,6 +45,37 @@ class UsageTracker:
         created_at = row[1] if row else datetime.now(timezone.utc)
         if plan.code == "trial":
             return plan, created_at, created_at + timedelta(days=settings.TRIAL_DURATION_DAYS)
+        # Stripe-paid users follow their paid subscription anniversary, not the
+        # calendar month. Only verified invoices can create these period rows.
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT COALESCE(f.period_start,p.period_start),
+                    COALESCE(f.period_end,p.period_end), COALESCE(f.budget_usd,p.budget_usd),
+                    CASE WHEN f.period_start IS NOT NULL THEN 'active' ELSE a.subscription_status END
+                FROM billing_accounts a
+                LEFT JOIN LATERAL (
+                    SELECT period_start, period_end, budget_usd FROM billing_periods
+                    WHERE user_id=a.user_id AND subscription_id=a.subscription_id
+                    ORDER BY period_start DESC LIMIT 1
+                ) p ON true
+                LEFT JOIN LATERAL (
+                    SELECT period_start,period_end,budget_usd FROM billing_fpx_orders
+                    WHERE user_id=a.user_id AND status='paid' AND
+                        (a.subscription_id IS NULL OR a.subscription_status IN ('none','canceled','incomplete_expired'))
+                    ORDER BY period_start DESC LIMIT 1
+                ) f ON true WHERE a.user_id=%s""", (user_id,))
+            paid = cur.fetchone()
+        if paid:
+            now = datetime.now(timezone.utc)
+            if not paid[0]:
+                # Never fall back to a free calendar-month Pro allowance when
+                # the current Stripe subscription has no verified paid period.
+                return replace(plan, ai_budget_usd=Decimal("0")), now, now
+            start, end, budget, subscription_status = paid
+            if subscription_status != "active":
+                end = min(end, now)
+            return replace(plan, ai_budget_usd=Decimal(str(budget))), start, end
+        # Preserve existing manually provisioned development accounts. Their
+        # legacy USD setting is not used for new Stripe-paid subscriptions.
         now = datetime.now(timezone.utc)
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
@@ -65,10 +97,13 @@ class UsageTracker:
 
     def ensure_ai_budget_available(self, user_id: str) -> None:
         plan, period_start, period_end = self.period_for_user(user_id)
-        if datetime.now(timezone.utc) >= period_end:
+        now = datetime.now(timezone.utc)
+        if now < period_start or now >= period_end:
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS,
-                "Your trial has ended. Upgrade to continue using AI processing and questions.",
+                "Your trial has ended. Upgrade to continue using AI processing and questions."
+                if plan.code == "trial" else
+                "Your paid usage period is not active. Please check your subscription payment.",
             )
         if self.ai_cost_used(user_id, period_start, period_end) >= plan.ai_budget_usd:
             raise HTTPException(

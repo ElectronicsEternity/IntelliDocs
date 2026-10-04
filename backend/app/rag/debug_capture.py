@@ -27,7 +27,7 @@ def _json_value(value):
 
 
 class AnswerDebugCapture:
-    def __init__(self, *, question, chunks, request, prompt_version):
+    def __init__(self, *, question, chunks, request, prompt_version, context_compaction=None):
         self.path = None
         if not settings.RAG_DEBUG_CAPTURE_ENABLED:
             return
@@ -51,6 +51,10 @@ class AnswerDebugCapture:
             "request": deepcopy(request),
             "status": "pending",
         }
+        # Explain reused bodies without replacing the original evidence. This
+        # lets tests verify every raw chunk still has a prompt-side citation.
+        if context_compaction is not None:
+            self.payload["context_compaction"] = deepcopy(context_compaction)
         # If enabled capture cannot be saved, fail before spending on an answer
         # that would lack the evidence needed to troubleshoot it.
         try:

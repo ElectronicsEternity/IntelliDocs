@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
+from app.api.billing_routes import router as billing_router
 from app.config import settings
 
 
@@ -15,6 +16,7 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
     application.include_router(router)
+    application.include_router(billing_router)
     return application
 
 

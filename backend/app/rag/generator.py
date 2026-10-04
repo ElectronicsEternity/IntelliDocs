@@ -8,10 +8,11 @@ from app.config import settings
 from app.constants import CHAT_MODEL, CHAT_REASONING_EFFORT
 from app.services.usage.ai_usage import tracked_ai_call
 from app.rag.debug_capture import AnswerDebugCapture
+from app.rag.context_packer import pack_context
 
 
 # Bump when answer instructions change so saved requests remain comparable.
-ANSWER_PROMPT_VERSION = "applicability-scope-references-v2"
+ANSWER_PROMPT_VERSION = "applicability-scope-compact-context-v3"
 
 
 class Generator:
@@ -32,70 +33,9 @@ class Generator:
         chunks: list[dict]
     ) -> str:
 
-        # Label every context block with its source document.
-        context_parts = []
-
-        # Preserve source identity when topics overlap.
-        for chunk in chunks:
-            source = (
-                chunk.get("document_title")
-                or chunk.get("document_name")
-                or "Unknown"
-            )
-
-            # Include only metadata needed to interpret text.
-            node_type = chunk.get("node_type") or "Unknown"
-            identifier = chunk.get("identifier") or ""
-            node_title = chunk.get("node_title") or ""
-            metadata = chunk.get("metadata") or {}
-            hierarchy_path = metadata.get(
-                "hierarchy_path",
-                [],
-            )
-
-            # Build one clearly labelled context block.
-            context_lines = [
-                f"Source: {source}",
-                f"Node type: {node_type}",
-            ]
-
-            # Include the exact identifier when present.
-            if identifier:
-                context_lines.append(
-                    f"Identifier: {identifier}"
-                )
-
-            # Include a descriptive title only when available.
-            if node_title:
-                context_lines.append(
-                    f"Node title: {node_title}"
-                )
-
-            # Show the parent chain from broad to specific.
-            if hierarchy_path:
-                context_lines.append(
-                    "Hierarchy: "
-                    + " > ".join(hierarchy_path)
-                )
-
-            # Add the complete retrieved chunk text last.
-            # State why linked evidence was included, without claiming the link
-            # itself proves a legal effect. The actual provision text controls.
-            for link in chunk.get("reference_links", []):
-                reference = link["reference"]
-                target = reference["identifier"] + (reference["sub_identifier"] or "")
-                context_lines.append(
-                    f"Printed reference connection ({link['direction']}): "
-                    f"{reference['node_type']} {target} within this document."
-                )
-            context_lines.append(f"Text: {chunk['text']}")
-            context_parts.append(
-                "\n".join(context_lines)
-            )
-
-        # Separate sources clearly for the answer model.
-        context = "\n\n".join(context_parts)
-
+        # Compact labels and proven same-provision overlaps, without applying
+        # a new allowance or dropping any selected/reference-followed provision.
+        context, context_compaction = pack_context(chunks)
         # Build prompt
         prompt = f"""
 Context:
@@ -129,6 +69,14 @@ Never rename a SUBSECTION as a SECTION.
 When citing a SUBSECTION or CLAUSE, use its Hierarchy to
 name the nearest descriptive parent. Do not present a child
 reference as though it stands alone.
+
+Resolve document (D), hierarchy (H), printed-reference (R),
+and evidence (E) labels using the context legends. Hierarchy
+labels inherit their parent's full path. Never cite these
+internal labels in the answer; cite the original document,
+node type, identifier and descriptive parent instead.
+When text is included verbatim in another evidence block,
+read that block while preserving this block's citation.
 
 4. An applicability clause is a clause that expressly states
 whether the requested provision applies or does not apply.
@@ -186,6 +134,7 @@ Answer:
         capture = AnswerDebugCapture(
             question=question, chunks=chunks, request=request,
             prompt_version=ANSWER_PROMPT_VERSION,
+            context_compaction=context_compaction,
         )
         response = None
         try:
