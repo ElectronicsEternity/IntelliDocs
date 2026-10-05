@@ -17,7 +17,7 @@ class ConversationRepository:
         with get_connection() as conn, conn.cursor() as cur:
             if conversation_id:
                 cur.execute(
-                    "SELECT id FROM conversations WHERE id = %s AND user_id = %s",
+                    "UPDATE conversations SET updated_at = NOW() WHERE id = %s AND user_id = %s RETURNING id",
                     (conversation_id, user_id),
                 )
                 if cur.fetchone() is None:

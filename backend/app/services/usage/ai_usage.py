@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from decimal import Decimal
 import logging
+import json
 import uuid
 
 from app.config import settings
@@ -102,32 +103,78 @@ def _insert(record):
         )
 
 
-def tracked_ai_call(call, *, activity, model, user_id=None, document_id=None, attempt=1):
+def estimate_request_cost(model, request, *, client=None):
+    """Conservative input + maximum output cost, using no cached-input discount."""
+    rates = _rates(model)
+    if rates is None or any(rate < 0 for rate in rates):
+        raise ValueError("AI model pricing must be configured before spending allowance.")
+    if model == "text-embedding-3-small":
+        import tiktoken
+        encoding = tiktoken.get_encoding("cl100k_base")
+        # Literal user text must not be interpreted as tokenizer control tokens.
+        inputs = request["input"]
+        inputs = [inputs] if isinstance(inputs, str) else inputs
+        input_tokens = sum(len(encoding.encode(text, disallowed_special=())) for text in inputs)
+        output_tokens = 0
+    elif '"input_file"' in json.dumps(request):
+        # A PDF's bytes alone cannot predict its rendered-image token cost.
+        # Ask the provider's counting endpoint, not its answer-generation endpoint.
+        if client is None:
+            raise ValueError("PDF token counting requires the configured provider client.")
+        count_request = {key: request[key] for key in ("model", "input", "text", "reasoning") if key in request}
+        input_tokens = client.responses.input_tokens.count(**count_request).input_tokens
+        output_tokens = request["max_output_tokens"]
+    else:
+        # UTF-8 bytes bound text tokens conservatively; include framing/schema overhead.
+        input_tokens = len(json.dumps(request, ensure_ascii=False).encode("utf-8")) + 1024
+        output_tokens = request.get("max_output_tokens", request.get("max_completion_tokens"))
+    if not isinstance(input_tokens, int) or input_tokens < 0 or not isinstance(output_tokens, int) or output_tokens < 0:
+        raise ValueError("A bounded AI request is required before reserving allowance.")
+    if input_tokens > settings.AI_LONG_CONTEXT_TOKEN_THRESHOLD and model.startswith(("gpt-5.6-", "gpt-6.1-sol")):
+        rates = (rates[0] * 2, rates[1] * 2, rates[2] * Decimal("1.5"))
+    return (Decimal(input_tokens) * rates[0] + Decimal(output_tokens) * rates[2]) / Decimal(1_000_000)
+
+
+def tracked_ai_call(call, *, activity, model, user_id=None, document_id=None, attempt=1, budget_estimate=None):
     context = _context.get()
     if activity == "embedding":
         activity = context.get("embedding_activity", activity)
     owner = user_id or context.get("user_id")
     response = None
     error = None
+    reservation_id = None
+    invoked = False
     try:
         if owner and context.get("enforce_budget"):
             # Import locally to keep the usage logger independent at import time.
             from app.services.usage.tracker import UsageTracker
             UsageTracker().ensure_ai_budget_available(owner)
+            from app.services.usage.reservations import reserve
+            if budget_estimate is None:
+                raise ValueError("AI allowance estimate missing; request was not sent.")
+            reservation_id = reserve(owner, budget_estimate())
+        invoked = True
         response = call()
         return response
     except Exception as exc:
         error = exc
         raise
     finally:
-        if owner:
+        if owner and invoked:
             try:
                 record = build_record(
                     response, activity=activity, model=model, user_id=owner,
                     document_id=document_id or context.get("document_id"),
                     conversation_id=context.get("conversation_id"), attempt=attempt, error=error,
                 )
-                _insert(record)
+                if reservation_id:
+                    from app.services.usage.reservations import finish
+                    # Explicit provider rejection is safe to release. Timeouts,
+                    # connection errors and server errors retain an uncertain hold.
+                    rejected = _get(error, "status_code") in (400, 401, 403, 404, 422, 429)
+                    finish(reservation_id, record, rejected=rejected)
+                else:
+                    _insert(record)
             except Exception:
                 # Never repeat a paid request just because analytics storage failed.
                 logger.exception("AI usage logging failed for activity %s", activity)

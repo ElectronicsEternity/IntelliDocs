@@ -65,7 +65,7 @@ Updated 2026-10-05. This records agreed follow-up work, not authorization to run
 
 ## Allowances, billing and production setup
 
-- Configure private storage and automatic 7/14-day retention for answer debug
+- Configure private storage and automatic 14-day retention for answer debug
   captures before production deployment. Local per-request JSON capture is now
   implemented and enabled under `logs/rag_debug/`; local automatic deletion is deferred.
 
@@ -74,7 +74,7 @@ Updated 2026-10-05. This records agreed follow-up work, not authorization to run
    Stripe-paid periods snapshot the configurable MYR allowance and USD/MYR rate.
    Legacy manually provisioned development Pro accounts still use the old USD
    setting; do not mistake that for the new subscription allowance.
-9. Implement proper cost reservations before API calls so a call or concurrent requests cannot overrun the remaining allowance; reconcile reserved amounts with recorded usage.
+9. Cost reservations are implemented locally as of 2026-10-05; production deployment and combined regression tests remain. Verify question embedding plus answer cost, complete ingestion cost including retries, and blocking before paid calls on a separate low-allowance test account. Deduct actual recorded cost, not the temporary reservation. OpenAI daily Costs API reconciliation is deferred by user decision.
 10. Set up Stripe registration, checkout, webhooks and Pro activation, including subscription cancellation and payment-event verification.
     User supplied Price ID `price_1UMpGtJ2uPtu69mu9AaYMR6r` on 2026-10-04.
     Verify it belongs to the intended sandbox and RM50 MYR monthly recurring
@@ -115,6 +115,21 @@ Updated 2026-10-05. This records agreed follow-up work, not authorization to run
     presentation of renewal/failure/recovery remains a separate manual UI check;
     sandbox success does not constitute live-production readiness.
 11. Configure the production email provider and domain, then complete the deferred email-limit test case 8.
+
+## Risk and regulatory readiness — agreed 2026-10-05
+
+- Treat this as one continuing improvement item, with a minimum launch gate rather than postponing all compliance work.
+- Establish truthful privacy, terms, cancellation/refund, retention and AI-use policies; publish approved versions and record acceptance where appropriate.
+- Review Malaysian personal-data duties, overseas processing, incident response, applicable registration/DPO requirements, customer disclosures and user-managed tax setup.
+- Implement complete document/account deletion, local-cache and debugging-log cleanup, verified backup retention and deletion retries before promising automatic deletion.
+- Keep financial/audit records separate from document content with justified retention periods. Subscription cancellation is not account deletion.
+- See docs/BASELINE_POLICIES_DRAFT.md for the initial policy baseline, current implementation gaps and owner decisions. No legal clearance, public publication or deletion implementation is implied.
+- Prepared the four requested review documents under docs/compliance/: privacy notice, data-flow/vendor map, provider processing-terms review and security-control register. These are drafts with explicit unresolved settings/contract evidence, not completed live-compliance approvals. Document-cache lifetime follows the maintained document.
+- Retention implemented locally 2026-10-06: `CHAT_RETENTION_DAYS` and `DEBUG_RETENTION_DAYS` default to 14, configurable through backend `.env` with restart. Backend lifespan runs cleanup on startup and periodically; expiry is measured from each message/capture's creation. Recent messages and minimal usage/cost/billing/reservation records are preserved. Failures are logged for monitoring; backend downtime delays cleanup. Account-wide deletion, provider retention and production access-control verification remain separate work.
+- Ask displays only the current in-memory chat session, reset by New conversation, refresh or navigating away. Saved messages expire independently; new activity never extends older messages' retention. This supersedes inactivity-based retention. Frontend tests confirm no history reload. Complete owner-scoped document profile/table/checkpoint cleanup and associated debug-capture removal now run before DB deletion, with a reprocessing-cost confirmation and processing/deletion lock. Local and isolated PostgreSQL tests passed; deployment/restart remains required.
+- Billing decision: retain necessary accounting evidence for the agreed statutory seven-year period (normally from the end of the relevant income year, with applicable late-filing/other exceptions); periodically archive securely outside the hot application database. Define export cadence, readable format, integrity checks, searchable retrieval, access protection and compliant archive location before deleting hot copies. Do not retain every raw webhook/log for seven years by default. Preserve minimal model/token/cost usage records independently of chat content; their category-specific retention needs assessment, not automatic deletion with messages or blanket seven-year retention. Chat bodies are not required simply to calculate allowance usage.
+- Future development: complete financial archiving and refund reconciliation. Export necessary Stripe invoices/payments/refunds and financial references into a secure, readable, retrievable archive with integrity verification and retention/expiry controls; only remove redundant hot copies after verifying the archive. Reconcile refund status/amount against the original payment and update local financial records and any approved entitlement/allowance changes idempotently. Handle pending/failed/partial refunds and repeated events; verify with sandbox tests. Current invoice references/paid-period tracking are not a complete accounting archive or refund workflow.
+- Backup readiness: owner reports current Supabase Free plan excludes project backups; no manual/off-site backup verified. Before live launch choose, configure and restore-test database and uploaded-file backup coverage, access controls and expiry. Supabase database backups do not include Storage objects. Pro's offered seven-day scheduled recovery window is not the seven-year accounting archive or the fourteen-day chat/debug retention. No upgrade authorized or performed.
 
 ## Saved retrieval regression questions
 

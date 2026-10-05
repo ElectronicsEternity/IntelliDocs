@@ -1,4 +1,5 @@
 from io import BytesIO
+from contextlib import nullcontext
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -8,6 +9,9 @@ from app.services.storage.supabase_storage import SupabaseDocumentStorage
 
 
 class FakeRepository:
+    def operation_lock(self, document_id, user_id):
+        return nullcontext()
+
     def __init__(self):
         self.record = None
         self.statuses = []
@@ -42,6 +46,12 @@ class FakeRepository:
         if self.record and self.record["id"] == document_id and self.record["user_id"] == user_id:
             return self.record
         return None
+
+    def delete_for_user(self, document_id, user_id):
+        if self.get_for_user(document_id, user_id):
+            self.record = None
+            return True
+        return False
 
     def set_status(self, document_id, user_id, status, *, error=None, page_count=None):
         self.statuses.append(status)
@@ -246,3 +256,37 @@ async def test_upload_uses_plan_specific_limits():
 
     assert error.value.status_code == 429
     assert "Trial plan" in str(error.value.detail)
+
+
+def test_document_delete_cleans_support_but_keeps_usage(monkeypatch):
+    repository, storage, usage = FakeRepository(), FakeStorage(), FakeUsage()
+    repository.create_uploaded(document_id="doc-a", user_id="user-a", original_filename="a.pdf", storage_path="a.pdf", file_size=8, file_hash="hash")
+    usage.record("user-a", "pages_processed", document_id="doc-a")
+    calls = []
+    monkeypatch.setattr("app.services.documents.service.remove_document_support", lambda user, doc: calls.append((user, doc)))
+    service = DocumentService(repository, storage, usage)
+    with pytest.raises(HTTPException):
+        service.delete("doc-a", "user-b")
+    assert calls == []
+    service.delete("doc-a", "user-a")
+    assert calls == [("user-a", "doc-a")]
+    assert repository.record is None and len(usage.events) == 1
+
+
+def test_delete_failure_leaves_record_for_retry(monkeypatch):
+    repository = FakeRepository()
+    repository.create_uploaded(document_id="doc-a", user_id="user-a", original_filename="a.pdf", storage_path="a.pdf", file_size=8, file_hash="hash")
+    def fail(*args): raise OSError("cleanup failed")
+    monkeypatch.setattr("app.services.documents.service.remove_document_support", fail)
+    with pytest.raises(OSError):
+        DocumentService(repository, FakeStorage(), FakeUsage()).delete("doc-a", "user-a")
+    assert repository.record is not None
+
+
+def test_delete_while_processing_is_rejected(monkeypatch):
+    repository = FakeRepository()
+    repository.create_uploaded(document_id="doc-a", user_id="user-a", original_filename="a.pdf", storage_path="a.pdf", file_size=8, file_hash="hash")
+    repository.record["processing_status"] = "processing"
+    with pytest.raises(HTTPException) as error:
+        DocumentService(repository, FakeStorage(), FakeUsage()).delete("doc-a", "user-a")
+    assert error.value.status_code == 409 and repository.record is not None

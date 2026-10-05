@@ -4,7 +4,7 @@ from openai import OpenAI
 # Import application settings
 from app.config import settings
 from app.constants import DEFAULT_EMBEDDING_MODEL
-from app.services.usage.ai_usage import tracked_ai_call
+from app.services.usage.ai_usage import tracked_ai_call, estimate_request_cost
 
 
 class Embedder:
@@ -13,7 +13,8 @@ class Embedder:
 
         # Create OpenAI client
         self.client = OpenAI(
-            api_key=settings.OPENAI_API_KEY
+            api_key=settings.OPENAI_API_KEY,
+            max_retries=0,  # Avoid hidden paid retries against a single allowance hold.
         )
 
 
@@ -57,6 +58,9 @@ class Embedder:
             model=DEFAULT_EMBEDDING_MODEL,
             user_id=user_id,
             document_id=document_id,
+            budget_estimate=lambda: estimate_request_cost(
+                DEFAULT_EMBEDDING_MODEL, {"input": texts},
+            ),
         )
         ordered = sorted(response.data, key=lambda item: item.index)
         if len(ordered) != len(texts):

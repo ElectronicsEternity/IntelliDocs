@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from dataclasses import replace
+from contextlib import nullcontext
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -25,9 +26,10 @@ class UsageTracker:
             row = cur.fetchone()
         return get_plan_limits(str(row[0]) if row else "trial")
 
-    def period_for_user(self, user_id: str) -> tuple[PlanLimits, datetime, datetime]:
+    def period_for_user(self, user_id: str, *, connection=None) -> tuple[PlanLimits, datetime, datetime]:
         """Return the active billing/trial period without exposing its dollar value."""
-        with get_connection() as conn, conn.cursor() as cur:
+        # Reservations reuse their locked transaction; normal callers own a connection.
+        with (nullcontext(connection) if connection is not None else get_connection()) as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO user_accounts (user_id, plan_code, created_at, updated_at)
@@ -47,7 +49,7 @@ class UsageTracker:
             return plan, created_at, created_at + timedelta(days=settings.TRIAL_DURATION_DAYS)
         # Stripe-paid users follow their paid subscription anniversary, not the
         # calendar month. Only verified invoices can create these period rows.
-        with get_connection() as conn, conn.cursor() as cur:
+        with (nullcontext(connection) if connection is not None else get_connection()) as conn, conn.cursor() as cur:
             cur.execute("""SELECT COALESCE(f.period_start,p.period_start),
                     COALESCE(f.period_end,p.period_end), COALESCE(f.budget_usd,p.budget_usd),
                     CASE WHEN f.period_start IS NOT NULL THEN 'active' ELSE a.subscription_status END

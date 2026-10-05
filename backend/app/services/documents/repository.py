@@ -1,4 +1,7 @@
 from typing import Any
+from contextlib import contextmanager
+
+from fastapi import HTTPException
 
 from psycopg.rows import dict_row
 
@@ -7,6 +10,19 @@ from app.database.connection import get_connection
 
 class DocumentRepository:
     """All document operations require the authenticated owner."""
+
+    @contextmanager
+    def operation_lock(self, document_id: str, user_id: str):
+        # Process and delete share a non-blocking transaction advisory lock.
+        # No row locks are held while the external processing/storage runs.
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"document-operation:{user_id}:{document_id}",),
+            )
+            if not cur.fetchone()[0]:
+                raise HTTPException(409, "Another operation is running for this document. Please retry later.")
+            yield
 
     def create_uploaded(
         self,

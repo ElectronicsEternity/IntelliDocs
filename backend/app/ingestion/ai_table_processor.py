@@ -23,11 +23,11 @@ from app.indexing.table_profile import (
     find_front_matter_table_pages,
     validate_table_profile,
 )
-from app.services.usage.ai_usage import tracked_ai_call
+from app.services.usage.ai_usage import tracked_ai_call, estimate_request_cost
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PROFILES_FOLDER = PROJECT_ROOT / "documents" / "Profiles"
+DEFAULT_PROFILES_FOLDER = settings.DOCUMENT_PROFILES_DIRECTORY
 TABLE_CACHE_VERSION = 2
 
 
@@ -124,30 +124,33 @@ class AIVisualTableProcessor:
         document_id: str,
         attempt: int | None = None,
     ) -> dict:
+        # Count the actual PDF and schema input before reserving allowance.
+        request = {
+            "model": model,
+            "reasoning": {"effort": settings.TABLE_REASONING_EFFORT},
+            "max_output_tokens": settings.TABLE_MAX_OUTPUT_TOKENS,
+            "input": [{
+                "role": "user",
+                "content": [
+                    self._file_content(filename, pdf_data),
+                    {"type": "input_text", "text": prompt},
+                ],
+            }],
+            "text": {"format": {
+                "type": "json_schema",
+                "name": schema_name,
+                "strict": True,
+                "schema": schema,
+            }},
+        }
         response = tracked_ai_call(
-            lambda: self.client.responses.create(
-                model=model,
-                reasoning={"effort": settings.TABLE_REASONING_EFFORT},
-                max_output_tokens=settings.TABLE_MAX_OUTPUT_TOKENS,
-                input=[{
-                    "role": "user",
-                    "content": [
-                        self._file_content(filename, pdf_data),
-                        {"type": "input_text", "text": prompt},
-                    ],
-                }],
-                text={"format": {
-                    "type": "json_schema",
-                    "name": schema_name,
-                    "strict": True,
-                    "schema": schema,
-                }},
-            ),
+            lambda: self.client.responses.create(**request),
             activity=activity,
             model=model,
             user_id=owner_id,
             document_id=document_id,
             attempt=attempt,
+            budget_estimate=lambda: estimate_request_cost(model, request, client=self.client),
         )
         if getattr(response, "status", None) != "completed":
             raise ValueError(f"{activity} returned an incomplete response.")

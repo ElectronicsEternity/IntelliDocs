@@ -95,7 +95,7 @@ export function DocumentPanel({ api }: Props) {
   }
 
   async function deleteDocument(document: DocumentRecord) {
-    if (!window.confirm(`Delete “${document.original_filename}”? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete “${document.original_filename}”?\n\nThis permanently removes the PDF and its supporting extraction profiles, tables, search data and processing caches. Re-uploading and processing it again will incur AI usage charges and use your allowance. Previous usage and financial records will be kept.\n\nThis cannot be undone.`)) return;
     try {
       setBusyId(document.id);
       setError("");
@@ -167,7 +167,7 @@ export function DocumentPanel({ api }: Props) {
                     ) : document.processing_status === "failed" ? "Retry processing" : "Process"}
                   </button>
                 )}
-                <button className="text-button danger" disabled={busyId === document.id} onClick={() => void deleteDocument(document)}>
+                <button className="text-button danger" disabled={busyId === document.id || document.processing_status === "processing"} onClick={() => void deleteDocument(document)}>
                   Delete
                 </button>
               </div>

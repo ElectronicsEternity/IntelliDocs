@@ -5,6 +5,23 @@ import type { IntelliDocsApi } from '../lib/api'
 import { ChatPanel } from './ChatPanel'
 
 describe('ChatPanel', () => {
+  it('clears the current conversation and never reloads saved history', async () => {
+    const api = { chat: vi.fn().mockResolvedValue({ conversation_id: 'old', answer: 'Old answer', sources: [] }) } as unknown as IntelliDocsApi
+    const { unmount } = render(<ChatPanel api={api} />)
+    fireEvent.change(screen.getByLabelText('Ask a question'), { target: { value: 'First question' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    await screen.findByText('Old answer')
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+    expect(screen.queryByText('Old answer')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Ask a question'), { target: { value: 'New question' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    await screen.findByText('Old answer')
+    expect(api.chat).toHaveBeenLastCalledWith('New question', undefined)
+    unmount()
+    render(<ChatPanel api={api} />)
+    expect(screen.queryByText('Old answer')).not.toBeInTheDocument()
+  })
+
   it('renders structured Markdown answers as headings and lists', async () => {
     const api = {
       chat: vi.fn().mockResolvedValue({

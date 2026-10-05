@@ -93,7 +93,7 @@ export function ChatPanel({ api }: Props) {
           <p className="muted">Get focused answers from your processed documents.</p>
         </div>
         {messages.length > 0 && (
-          <button className="secondary-button" onClick={() => { setMessages([]); setConversationId(undefined); }}>
+          <button className="secondary-button" disabled={submitting} onClick={() => { setMessages([]); setConversationId(undefined); }}>
             New conversation
           </button>
         )}

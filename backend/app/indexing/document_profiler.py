@@ -25,7 +25,7 @@ from openai import OpenAI
 
 from app.config import settings
 from app.indexing.hierarchy_prompt_rules import OPENING_TEXT_RULES, REFERENCE_RULES
-from app.services.usage.ai_usage import tracked_ai_call
+from app.services.usage.ai_usage import tracked_ai_call, estimate_request_cost
 from app.indexing.document_profile_validator import (
     DocumentProfileValidationError,
     DocumentProfileValidator,
@@ -41,7 +41,7 @@ from app.indexing.source_hierarchy_validator import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROFILES_FOLDER = (
-    PROJECT_ROOT / "documents" / "Profiles"
+    settings.DOCUMENT_PROFILES_DIRECTORY
 )
 # ==========================================================
 # Document Profiler
@@ -123,21 +123,21 @@ class DocumentProfiler:
                     errors=previous_errors,
                 )
 
-            # Send the current attempt to OpenAI.
+            # Bound and reserve each explicit repair attempt independently.
+            request = {
+                "model": settings.HIERARCHY_PROFILE_MODEL,
+                "reasoning": {"effort": settings.HIERARCHY_REASONING_EFFORT},
+                "max_output_tokens": settings.HIERARCHY_MAX_OUTPUT_TOKENS,
+                "input": prompt,
+            }
             response = tracked_ai_call(
-                lambda: self.client.responses.create(
-                    model=settings.HIERARCHY_PROFILE_MODEL,
-                    reasoning={
-                        "effort": settings.HIERARCHY_REASONING_EFFORT,
-                    },
-                    max_output_tokens=settings.HIERARCHY_MAX_OUTPUT_TOKENS,
-                    input=prompt,
-                ),
+                lambda: self.client.responses.create(**request),
                 activity="profiling",
                 model=settings.HIERARCHY_PROFILE_MODEL,
                 user_id=owner_id,
                 document_id=document_id,
                 attempt=attempt,
+                budget_estimate=lambda: estimate_request_cost(request["model"], request),
             )
             # Preserve the exact response before parsing it.
             raw_output = getattr(response, "output_text", "") or ""

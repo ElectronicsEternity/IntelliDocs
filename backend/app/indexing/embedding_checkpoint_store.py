@@ -6,10 +6,11 @@ from pathlib import Path
 import re
 
 from app.constants import CURRENT_EMBEDDING_VERSION, DEFAULT_EMBEDDING_MODEL
+from app.config import settings
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PROFILES_FOLDER = PROJECT_ROOT / "documents" / "Profiles"
+DEFAULT_PROFILES_FOLDER = settings.DOCUMENT_PROFILES_DIRECTORY
 
 
 class EmbeddingCheckpointStore:

@@ -18,6 +18,20 @@ const documentRecord: DocumentRecord = {
 }
 
 describe('DocumentPanel', () => {
+  it('warns about supporting data and reprocessing charges before deleting', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const api = { listDocuments: vi.fn().mockResolvedValue([documentRecord]), deleteDocument: vi.fn().mockResolvedValue(undefined) } as unknown as IntelliDocsApi
+    render(<DocumentPanel api={api} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('supporting extraction profiles'))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('incur AI usage charges'))
+    expect(api.deleteDocument).not.toHaveBeenCalled()
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(api.deleteDocument).toHaveBeenCalledWith('document-1'))
+    confirm.mockRestore()
+  })
+
   it('shows an active spinner as soon as processing starts', async () => {
     const processDocument = vi.fn(() => new Promise<DocumentRecord>(() => {}))
     const api = {

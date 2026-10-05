@@ -13,6 +13,7 @@ from app.services.documents.repository import DocumentRepository
 from app.services.storage.supabase_storage import SupabaseDocumentStorage
 from app.services.usage.tracker import UsageTracker
 from app.services.usage.ai_usage import ai_usage_context
+from app.services.retention import remove_document_support
 
 logger = logging.getLogger(__name__)
 
@@ -124,12 +125,25 @@ class DocumentService:
         return record
 
     def delete(self, document_id: str, user_id: str) -> None:
+        with self.repository.operation_lock(document_id, user_id):
+            self._delete(document_id, user_id)
+
+    def _delete(self, document_id: str, user_id: str) -> None:
         record = self.get(document_id, user_id)
+        if record["processing_status"] == "processing":
+            raise HTTPException(status.HTTP_409_CONFLICT, "Wait for document processing to finish before deleting it.")
+        # Keep the owner record until all external/cache cleanup succeeds, so
+        # an interrupted deletion can be retried without losing its targets.
+        remove_document_support(user_id, document_id)
         self.storage.delete(record["storage_path"])
         if not self.repository.delete_for_user(document_id, user_id):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
 
     def process(self, document_id: str, user_id: str) -> dict:
+        with self.repository.operation_lock(document_id, user_id):
+            return self._process(document_id, user_id)
+
+    def _process(self, document_id: str, user_id: str) -> dict:
         record = self.get(document_id, user_id)
         if record["processing_status"] == "processing":
             raise HTTPException(status.HTTP_409_CONFLICT, "Document is already processing.")

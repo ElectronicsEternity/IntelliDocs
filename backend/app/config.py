@@ -1,4 +1,5 @@
 from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -74,6 +75,9 @@ class Settings(BaseSettings):
     AI_GPT56_TERRA_CACHED_INPUT_RATE: float = 0.2
     AI_GPT56_TERRA_OUTPUT_RATE: float = 12.0
     AI_LONG_CONTEXT_TOKEN_THRESHOLD: int = 272_000
+    # Preserve the model's full output allowance; holds cover the worst-case output.
+    # This is configurable independently of the future large-request warning UI.
+    CHAT_MAX_OUTPUT_TOKENS: int = 128_000
     TABLE_PROFILE_MODEL: str = "gpt-5.6-sol"
     REGULAR_TABLE_MODEL: str = "gpt-5.6-terra"
     SEMANTIC_TABLE_MODEL: str = "gpt-5.6-sol"
@@ -102,6 +106,11 @@ class Settings(BaseSettings):
     # until private storage and automatic retention are configured.
     RAG_DEBUG_CAPTURE_ENABLED: bool = True
     RAG_DEBUG_CAPTURE_DIRECTORY: Path = Path(__file__).resolve().parents[2] / "logs" / "rag_debug"
+    CHAT_RETENTION_DAYS: int = Field(default=14, ge=1)
+    DEBUG_RETENTION_DAYS: int = Field(default=14, ge=1)
+    RETENTION_CLEANUP_ENABLED: bool = True
+    RETENTION_CLEANUP_INTERVAL_SECONDS: int = Field(default=28800, ge=60)
+    DOCUMENT_PROFILES_DIRECTORY: Path = Path(__file__).resolve().parents[2] / "documents" / "Profiles"
     FRONTEND_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property

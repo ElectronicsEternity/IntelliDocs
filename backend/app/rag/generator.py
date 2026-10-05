@@ -6,7 +6,7 @@ from openai import OpenAI
 
 from app.config import settings
 from app.constants import CHAT_MODEL, CHAT_REASONING_EFFORT
-from app.services.usage.ai_usage import tracked_ai_call
+from app.services.usage.ai_usage import tracked_ai_call, estimate_request_cost
 from app.rag.debug_capture import AnswerDebugCapture
 from app.rag.context_packer import pack_context
 
@@ -21,7 +21,8 @@ class Generator:
 
     def __init__(self):
         self.client = OpenAI(
-            api_key=settings.OPENAI_API_KEY
+            api_key=settings.OPENAI_API_KEY,
+            max_retries=0,  # Each paid attempt must receive its own allowance hold.
         )
         self.last_usage: dict[str, int] = {}
 
@@ -129,6 +130,7 @@ Answer:
         request = {
             "model": CHAT_MODEL,
             "reasoning_effort": CHAT_REASONING_EFFORT,
+            "max_completion_tokens": settings.CHAT_MAX_OUTPUT_TOKENS,
             "messages": [{"role": "user", "content": prompt}],
         }
         capture = AnswerDebugCapture(
@@ -141,6 +143,7 @@ Answer:
             response = tracked_ai_call(
                 lambda: self.client.chat.completions.create(**request),
                 activity="chat", model=CHAT_MODEL,
+                budget_estimate=lambda: estimate_request_cost(CHAT_MODEL, request),
             )
             if response.usage is not None:
                 self.last_usage = {

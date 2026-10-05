@@ -14,6 +14,8 @@ def disable_debug_capture_by_default(monkeypatch):
     # Dedicated capture tests opt in using pytest's private temporary folder.
     from app.config import settings
     monkeypatch.setattr(settings, "RAG_DEBUG_CAPTURE_ENABLED", False)
+    # TestClient lifespan must never purge the configured real database/files.
+    monkeypatch.setattr(settings, "RETENTION_CLEANUP_ENABLED", False)
 
 
 def document_record(document_id: str, owner: str, status: str = "uploaded") -> dict:
