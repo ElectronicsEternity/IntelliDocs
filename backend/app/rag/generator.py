@@ -12,7 +12,7 @@ from app.rag.context_packer import pack_context
 
 
 # Bump when answer instructions change so saved requests remain comparable.
-ANSWER_PROMPT_VERSION = "applicability-scope-compact-context-v3"
+ANSWER_PROMPT_VERSION = "language-aware-evidence-fallback-v4"
 
 
 class Generator:
@@ -97,8 +97,30 @@ accurately as possible.
 8. Be concise but complete. State the source document title
 for each answer.
 
-9. If the answer is not found in the context, say:
-"I could not find the answer in the provided document."
+9. Answer in the language explicitly requested by the user; otherwise use
+the language of the question, even when the evidence is in another language.
+Keep explanations and missing-evidence notices in that answer language.
+Original document titles, legal identifiers and verbatim source quotations
+may retain their original language. Do not insert an unsolicited English
+fallback into a Malay answer.
+
+When the context supports the answer, answer with supporting citations.
+When it supports only part of the question, explain the supported findings
+with citations and identify the unanswered part; do not discard useful evidence
+or turn partial support into a blanket refusal.
+When there is insufficient evidence to answer, use one general fallback:
+- English: "I could not find sufficient information in the attached document(s)
+  to answer this question."
+- Malay: "Saya tidak menemui maklumat yang mencukupi dalam dokumen yang
+  dilampirkan untuk menjawab soalan ini."
+For other answer languages, convey the same meaning in that language.
+Adapt singular/plural and document terminology to the actual question scope.
+For a partially answered question, apply the notice only to the unanswered part.
+Do not claim that information is absent everywhere in a document or documents
+merely because it is missing from the provided context. Do not claim an
+exhaustive or broader document search was performed unless that search is
+explicitly established. No separate classification of retrieval failure versus
+document-wide absence is required; both use the general evidence limitation.
 
 10. Format the answer as clean Markdown for a web interface:
 
@@ -119,6 +141,8 @@ for each answer.
 
 11. Put the supporting document title on a final separate
 line in this format: **Source:** document title.
+List supporting titles for multiple documents when applicable. Never invent
+a source title or citation for an unsupported answer.
 
 Answer:
 """
